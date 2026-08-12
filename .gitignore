@@ -1,0 +1,22 @@
+# Release artifacts
+memory-saver-*.zip
+*.xpi
+
+# Temporary Firefox profiles
+.firefox-profile/
+
+# Future JavaScript tooling output
+node_modules/
+dist/
+coverage/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.swp
+
+# Editor and operating-system metadata
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/

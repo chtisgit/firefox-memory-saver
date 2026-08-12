@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Memory Saver settings</title>
+    <link rel="stylesheet" href="options.css">
+  </head>
+  <body>
+    <main>
+      <header>
+        <p class="eyebrow">Memory Saver</p>
+        <h1>Settings</h1>
+        <p>Choose when tabs sleep and which tabs are always protected.</p>
+      </header>
+
+      <form id="settings-form">
+        <section>
+          <h2>Automatic discarding</h2>
+          <label class="check"><input id="enabled" type="checkbox"> Enable automatic tab discarding</label>
+          <div class="grid">
+            <label>Discard tabs after
+              <span class="input-row"><input id="inactivity" type="number" min="5" max="1440" required> minutes</span>
+            </label>
+            <label>Check every
+              <span class="input-row"><input id="scan-interval" type="number" min="1" max="60" required> minutes</span>
+            </label>
+            <label>Keep at least
+              <span class="input-row"><input id="minimum-loaded" type="number" min="1" max="20" required> loaded tabs per window</span>
+            </label>
+          </div>
+        </section>
+
+        <section>
+          <h2>Protected tabs</h2>
+          <label class="check"><input id="protect-pinned" type="checkbox"> Never discard pinned tabs</label>
+          <label class="check"><input id="protect-audible" type="checkbox"> Never discard tabs playing audio</label>
+          <label for="domains">Protected domains</label>
+          <textarea id="domains" rows="6" placeholder="mail.example.com&#10;music.example.org"></textarea>
+          <p class="hint">One hostname per line. Protecting example.com also protects its subdomains.</p>
+        </section>
+
+        <section>
+          <h2>Foreground activity history</h2>
+          <label class="check"><input id="usage-enabled" type="checkbox"> Record detailed foreground active-tab time</label>
+          <p class="warning">Optional and off by default. When enabled, URLs, titles, timestamps, and durations are stored only on this device. This measures selection in the focused Firefox window—not attention.</p>
+          <label>Keep history for
+            <span class="input-row"><input id="usage-days" type="number" min="1" max="30" required> days</span>
+          </label>
+          <button id="clear-usage" type="button" class="secondary">Clear usage data</button>
+        </section>
+
+        <div class="footer">
+          <p id="status" role="status" aria-live="polite"></p>
+          <button type="submit" class="primary">Save settings</button>
+        </div>
+      </form>
+    </main>
+    <script type="module" src="index.js"></script>
+  </body>
+</html>

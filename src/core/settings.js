@@ -1,0 +1,95 @@
+export const STORAGE_KEY = "memorySaverState";
+
+export const DEFAULT_SETTINGS = Object.freeze({
+  schemaVersion: 1,
+  enabled: true,
+  inactivityMinutes: 10,
+  scanIntervalMinutes: 3,
+  minimumLoadedTabsPerWindow: 2,
+  protectPinned: true,
+  protectAudible: true,
+  protectedDomains: [],
+  usageTrackingEnabled: false,
+  usageHistoryDays: 7,
+});
+
+const limits = {
+  inactivityMinutes: [5, 1440],
+  scanIntervalMinutes: [1, 60],
+  minimumLoadedTabsPerWindow: [1, 20],
+  usageHistoryDays: [1, 30],
+};
+
+function boundedInteger(value, fallback, [minimum, maximum]) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(maximum, Math.max(minimum, Math.round(parsed)));
+}
+
+export function normalizeDomain(value) {
+  const input = String(value ?? "").trim().toLowerCase();
+  if (!input) return null;
+  try {
+    const candidate = input.includes("://") ? input : `https://${input}`;
+    const hostname = new URL(candidate).hostname.replace(/^\.+|\.+$/g, "");
+    if (!hostname || hostname.includes(" ")) return null;
+    return hostname;
+  } catch {
+    return null;
+  }
+}
+
+export function normalizeSettings(value = {}) {
+  const domains = Array.isArray(value.protectedDomains)
+    ? [...new Set(value.protectedDomains.map(normalizeDomain).filter(Boolean))]
+    : [];
+
+  return {
+    schemaVersion: 1,
+    enabled: typeof value.enabled === "boolean" ? value.enabled : DEFAULT_SETTINGS.enabled,
+    inactivityMinutes: boundedInteger(value.inactivityMinutes, DEFAULT_SETTINGS.inactivityMinutes, limits.inactivityMinutes),
+    scanIntervalMinutes: boundedInteger(value.scanIntervalMinutes, DEFAULT_SETTINGS.scanIntervalMinutes, limits.scanIntervalMinutes),
+    minimumLoadedTabsPerWindow: boundedInteger(value.minimumLoadedTabsPerWindow, DEFAULT_SETTINGS.minimumLoadedTabsPerWindow, limits.minimumLoadedTabsPerWindow),
+    protectPinned: typeof value.protectPinned === "boolean" ? value.protectPinned : DEFAULT_SETTINGS.protectPinned,
+    protectAudible: typeof value.protectAudible === "boolean" ? value.protectAudible : DEFAULT_SETTINGS.protectAudible,
+    protectedDomains: domains,
+    usageTrackingEnabled: typeof value.usageTrackingEnabled === "boolean" ? value.usageTrackingEnabled : DEFAULT_SETTINGS.usageTrackingEnabled,
+    usageHistoryDays: boundedInteger(value.usageHistoryDays, DEFAULT_SETTINGS.usageHistoryDays, limits.usageHistoryDays),
+  };
+}
+
+export function emptyState() {
+  return {
+    schemaVersion: 1,
+    settings: { ...DEFAULT_SETTINGS },
+    discardRecords: {},
+    liveUsageRecords: {},
+    usageSessions: [],
+    lifetimeDiscardCount: 0,
+  };
+}
+
+export function normalizeState(value = {}) {
+  const initial = emptyState();
+  return {
+    ...initial,
+    ...value,
+    schemaVersion: 1,
+    settings: normalizeSettings(value.settings),
+    discardRecords: value.discardRecords && typeof value.discardRecords === "object" ? value.discardRecords : {},
+    liveUsageRecords: value.liveUsageRecords && typeof value.liveUsageRecords === "object" ? value.liveUsageRecords : {},
+    usageSessions: Array.isArray(value.usageSessions) ? value.usageSessions : [],
+    lifetimeDiscardCount: Number.isInteger(value.lifetimeDiscardCount) && value.lifetimeDiscardCount >= 0 ? value.lifetimeDiscardCount : 0,
+  };
+}
+
+export async function loadState() {
+  const stored = await browser.storage.local.get(STORAGE_KEY);
+  return normalizeState(stored[STORAGE_KEY]);
+}
+
+export async function saveState(state) {
+  const normalized = normalizeState(state);
+  await browser.storage.local.set({ [STORAGE_KEY]: normalized });
+  return normalized;
+}

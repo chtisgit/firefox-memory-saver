@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Memory Saver</title>
+    <link rel="stylesheet" href="popup.css">
+  </head>
+  <body>
+    <header>
+      <div>
+        <h1>Memory Saver</h1>
+        <p class="subtitle" id="status-copy">Loading…</p>
+      </div>
+      <div class="header-controls">
+        <button id="settings" class="settings-button" aria-label="Open settings" title="Settings">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M9.55 3.25h4.9l.52 2.07c.55.23 1.06.53 1.53.89l2.05-.59L21 9.86l-1.53 1.48a8.2 8.2 0 0 1 0 1.32L21 14.14l-2.45 4.24-2.05-.59c-.47.36-.98.66-1.53.89l-.52 2.07h-4.9l-.52-2.07a7.8 7.8 0 0 1-1.53-.89l-2.05.59L3 14.14l1.53-1.48a8.2 8.2 0 0 1 0-1.32L3 9.86l2.45-4.24 2.05.59c.47-.36.98-.66 1.53-.89l.52-2.07Z"/>
+            <circle cx="12" cy="12" r="3.15"/>
+          </svg>
+        </button>
+        <label class="switch">
+          <input id="enabled" type="checkbox" aria-label="Enable automatic tab discarding">
+          <span aria-hidden="true"></span>
+        </label>
+      </div>
+    </header>
+
+    <main>
+      <section class="summary" aria-labelledby="summary-title">
+        <div class="summary-copy">
+          <h2 id="summary-title">Sleeping tabs</h2>
+          <span id="lifetime-count"></span>
+        </div>
+        <strong id="discarded-count">—</strong>
+      </section>
+
+      <section class="actions" aria-label="Tab actions">
+        <button id="discard-window" class="primary">Discard eligible now</button>
+        <button id="discard-others">Discard other tabs</button>
+      </section>
+
+      <p id="notice" class="notice" role="status" aria-live="polite"></p>
+
+      <section aria-labelledby="tabs-title">
+        <div class="section-heading">
+          <h2 id="tabs-title">Currently discarded</h2>
+        </div>
+        <div id="tab-list" class="tab-list"></div>
+      </section>
+    </main>
+    <script type="module" src="index.js"></script>
+  </body>
+</html>

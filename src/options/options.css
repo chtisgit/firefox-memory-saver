@@ -1,0 +1,26 @@
+:root { color-scheme: light dark; font: 15px/1.5 system-ui, sans-serif; background: Canvas; color: CanvasText; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+main { width: min(720px, calc(100% - 32px)); margin: 0 auto; padding: 48px 0 80px; }
+header { margin-bottom: 30px; }
+h1 { margin: 0; font-size: 32px; }
+h2 { margin: 0 0 16px; font-size: 18px; }
+p { margin: 4px 0; color: color-mix(in srgb, CanvasText 68%, transparent); }
+.eyebrow { color: AccentColor; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; }
+section { margin: 16px 0; padding: 24px; border: 1px solid color-mix(in srgb, CanvasText 15%, transparent); border-radius: 12px; }
+label { display: block; margin: 12px 0; font-weight: 600; }
+.check { display: flex; gap: 9px; align-items: center; }
+input[type="checkbox"] { width: 17px; height: 17px; }
+input[type="number"], textarea { margin-top: 6px; border: 1px solid color-mix(in srgb, CanvasText 25%, transparent); border-radius: 6px; background: Field; color: FieldText; font: inherit; }
+input[type="number"] { width: 88px; padding: 7px; }
+textarea { display: block; width: 100%; padding: 9px; resize: vertical; }
+.grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 24px; }
+.input-row { display: flex; align-items: center; gap: 8px; font-weight: 400; }
+.hint, .warning { font-size: 13px; }
+.warning { max-width: 620px; padding: 10px 12px; border-radius: 7px; background: color-mix(in srgb, #d99000 12%, Canvas); color: CanvasText; }
+button { min-height: 38px; padding: 0 15px; border: 1px solid color-mix(in srgb, CanvasText 25%, transparent); border-radius: 7px; background: ButtonFace; color: ButtonText; cursor: pointer; font-weight: 600; }
+button.primary { background: AccentColor; border-color: AccentColor; color: AccentColorText; }
+button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid AccentColor; outline-offset: 2px; }
+.footer { position: sticky; bottom: 0; display: flex; align-items: center; justify-content: flex-end; gap: 18px; padding: 14px 0; background: Canvas; }
+#status.error { color: #c33; }
+@media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }
