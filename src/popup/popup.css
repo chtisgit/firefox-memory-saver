@@ -37,7 +37,7 @@ button.primary { color: AccentColorText; background: AccentColor; border-color: 
 .notice { min-height: 20px; color: color-mix(in srgb, CanvasText 75%, transparent); }
 .notice.error { color: #c33; }
 .section-heading { display: flex; align-items: center; justify-content: space-between; margin: 8px 0; }
-.tab-list { max-height: 640px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; }
+.tab-list { max-height: 330px; overflow-x: hidden; overflow-y: auto; overscroll-behavior: contain; scrollbar-gutter: stable; }
 .tab-row { display: grid; grid-template-columns: 32px minmax(0, 1fr) auto; gap: 9px; align-items: center; padding: 10px 16px 10px 0; border-top: 1px solid color-mix(in srgb, CanvasText 12%, transparent); }
 .favicon { width: 24px; height: 24px; object-fit: contain; }
 .fallback { display: grid; place-items: center; border-radius: 6px; background: color-mix(in srgb, AccentColor 15%, Canvas); font-weight: 700; }
