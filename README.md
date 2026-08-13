@@ -29,8 +29,8 @@ per-tab memory usage to ordinary WebExtensions, and estimates are future work.
 3. Select **Load Temporary Add-on**.
 4. Choose this project's `manifest.json`.
 
-Firefox 128 or newer is required. Temporary extensions are removed when Firefox
-closes.
+Firefox 140 or newer is required on desktop; Firefox for Android requires version
+142 or newer. Temporary extensions are removed when Firefox closes.
 
 ## Run the unit tests
 
