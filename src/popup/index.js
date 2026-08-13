@@ -33,6 +33,25 @@ function reasonLabel(reason) {
   }[reason] ?? "Unknown";
 }
 
+function createActionButton(className, label, paths) {
+  const button = document.createElement("button");
+  button.className = `tab-action ${className}`;
+  button.type = "button";
+  button.title = label;
+  button.setAttribute("aria-label", label);
+
+  const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+  svg.setAttribute("viewBox", "0 0 24 24");
+  svg.setAttribute("aria-hidden", "true");
+  for (const pathData of paths) {
+    const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+    path.setAttribute("d", pathData);
+    svg.append(path);
+  }
+  button.append(svg);
+  return button;
+}
+
 function createTabRow(record) {
   const row = document.createElement("article");
   row.className = "tab-row";
@@ -66,16 +85,14 @@ function createTabRow(record) {
   metadata.textContent = `${hostname(record.url)} · ${formatRelative(record.discardedAt)} · ${reasonLabel(record.reason)}${usage}${lastActive}`;
   copy.append(title, metadata);
 
-  const restore = document.createElement("button");
-  restore.className = "restore";
-  restore.textContent = "Restore";
-
-  const close = document.createElement("button");
-  close.className = "close-tab";
-  close.type = "button";
-  close.textContent = "×";
-  close.title = "Close tab";
-  close.setAttribute("aria-label", `Close ${title.textContent}`);
+  const restore = createActionButton("restore", "Restore tab", [
+    "M4.75 8.5V4.75H8.5",
+    "M5.2 7.65A8 8 0 1 1 4.4 14",
+  ]);
+  const close = createActionButton("close-tab", "Close tab", [
+    "M6.75 6.75 17.25 17.25",
+    "M17.25 6.75 6.75 17.25",
+  ]);
 
   const actions = document.createElement("div");
   actions.className = "tab-actions";

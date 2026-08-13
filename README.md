@@ -6,6 +6,10 @@ tab bar. Selecting a discarded tab restores it normally.
 The current implementation is an MVP and uses native WebExtension modules with
 no build step or third-party runtime dependencies.
 
+Raster artwork is stored with Git LFS. Contributors should install Git LFS and
+run `git lfs install` before cloning or checking out the project. SVG files remain
+ordinary text Git objects.
+
 ## Features
 
 - Configurable automatic discarding based on Firefox's `lastAccessed` timestamp.
