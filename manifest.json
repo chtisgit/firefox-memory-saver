@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Memory Saver",
-  "version": "0.1.1",
+  "version": "0.2.0",
   "description": "Automatically discard unused firefox tabs to save memory.",
   "icons": {
     "16": "icons/icon-16.png",
@@ -9,7 +9,7 @@
     "48": "icons/icon-48.png",
     "96": "icons/icon-96.png"
   },
-  "permissions": ["tabs", "alarms", "storage", "sessions"],
+  "permissions": ["tabs", "alarms", "storage", "sessions", "menus"],
   "background": {
     "scripts": ["src/background/index.js"],
     "type": "module"

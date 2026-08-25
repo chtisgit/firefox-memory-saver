@@ -1,5 +1,6 @@
 # Release artifacts
 memory-saver-*.zip
+memory-saver.zip
 *.xpi
 
 # Temporary Firefox profiles

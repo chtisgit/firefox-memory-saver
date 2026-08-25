@@ -1,4 +1,4 @@
-import { inspectEligibility, selectEligibleTabs } from "../src/core/eligibility.js";
+import { inspectEligibility, protectedHostname, protectionReasons, selectEligibleTabs } from "../src/core/eligibility.js";
 import { DEFAULT_SETTINGS, normalizeDomain, normalizeSettings } from "../src/core/settings.js";
 import { endLiveRecord, pruneUsage, recoverInterruptedUsage } from "../src/core/usage.js";
 
@@ -48,6 +48,27 @@ test("protects active, pinned, audible, internal, and protected-domain tabs", ()
   equal(inspectEligibility(tab({ audible: true }), settings).reason, "audible");
   equal(inspectEligibility(tab({ url: "about:config" }), settings).reason, "unsupported-url");
   equal(inspectEligibility(tab({ url: "https://news.example.com" }), settings).reason, "protected-domain");
+  equal(inspectEligibility(tab({ memorySaverProtected: true }), DEFAULT_SETTINGS).reason, "protected-tab");
+});
+
+test("matches protected domains including their subdomains", () => {
+  equal(protectedHostname("https://news.example.com/story", ["example.com"]), "news.example.com");
+  equal(protectedHostname("https://notexample.com", ["example.com"]), null);
+  equal(protectedHostname("about:config", ["example.com"]), null);
+});
+
+test("identifies durable and rule-based tab protections", () => {
+  const settings = { ...DEFAULT_SETTINGS, protectedDomains: ["example.com"] };
+  equal(protectionReasons(tab({ memorySaverProtected: true, pinned: true }), settings), [
+    { type: "tab" },
+    { type: "pinned" },
+    { type: "domain", domain: "example.com" },
+  ]);
+  equal(protectionReasons(tab({ audible: true, url: "about:config" }), settings), [
+    { type: "audible" },
+    { type: "special-page" },
+  ]);
+  equal(protectionReasons(tab({ discarded: true, memorySaverProtected: true }), settings), []);
 });
 
 test("applies inactivity threshold", () => {
@@ -104,9 +125,10 @@ test("background module loads against the Firefox API contract", async () => {
   globalThis.browser = {
     storage: { local: { async get() { return {}; }, async set() {} } },
     alarms: { async clear() {}, create() {}, onAlarm: event },
-    runtime: { onMessage: event },
+    runtime: { onMessage: event, onInstalled: event },
     tabs: {
       async query() { return []; },
+      async update() {},
       async remove() {},
       onActivated: event,
       onUpdated: event,
@@ -122,6 +144,15 @@ test("background module loads against the Firefox API contract", async () => {
     sessions: {
       async getTabValue() { return null; },
       async setTabValue() {},
+      async removeTabValue() {},
+    },
+    menus: {
+      async removeAll() {},
+      create() {},
+      async update() {},
+      async refresh() {},
+      onShown: event,
+      onClicked: event,
     },
   };
   const errors = [];

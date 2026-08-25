@@ -42,11 +42,16 @@
 
       <p id="notice" class="notice" role="status" aria-live="polite"></p>
 
-      <section aria-labelledby="tabs-title">
-        <div class="section-heading">
-          <h2 id="tabs-title">Sleeping tabs</h2>
+      <section aria-label="Open tab status">
+        <div class="view-tabs" role="tablist" aria-label="Tab lists">
+          <button id="sleeping-view" class="view-tab selected" type="button" role="tab" aria-selected="true" aria-controls="tab-list">
+            Sleeping tabs <span id="sleeping-view-count" class="view-count">0</span>
+          </button>
+          <button id="protected-view" class="view-tab" type="button" role="tab" aria-selected="false" aria-controls="tab-list" tabindex="-1">
+            Protected tabs <span id="protected-view-count" class="view-count">0</span>
+          </button>
         </div>
-        <div id="tab-list" class="tab-list"></div>
+        <div id="tab-list" class="tab-list" role="tabpanel" aria-labelledby="sleeping-view"></div>
       </section>
     </main>
     <script type="module" src="index.js"></script>

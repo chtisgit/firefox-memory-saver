@@ -4,6 +4,10 @@ const elements = {
   enabled: document.querySelector("#enabled"),
   status: document.querySelector("#status-copy"),
   count: document.querySelector("#discarded-count"),
+  sleepingView: document.querySelector("#sleeping-view"),
+  protectedView: document.querySelector("#protected-view"),
+  sleepingViewCount: document.querySelector("#sleeping-view-count"),
+  protectedViewCount: document.querySelector("#protected-view-count"),
   lifetime: document.querySelector("#lifetime-count"),
   list: document.querySelector("#tab-list"),
   notice: document.querySelector("#notice"),
@@ -13,6 +17,7 @@ const elements = {
 };
 
 let popupState;
+let selectedView = "sleeping";
 
 async function request(message) {
   const response = await browser.runtime.sendMessage(message);
@@ -22,6 +27,15 @@ async function request(message) {
 
 function hostname(url) {
   try { return new URL(url).hostname; } catch { return "Unknown site"; }
+}
+
+function siteLabel(url) {
+  try {
+    const parsed = new URL(url);
+    return parsed.hostname || `${parsed.protocol.replace(":", "")} page`;
+  } catch {
+    return "Unknown site";
+  }
 }
 
 function reasonLabel(reason) {
@@ -50,6 +64,48 @@ function createActionButton(className, label, paths) {
   }
   button.append(svg);
   return button;
+}
+
+function createTabActions(record, primaryLabel = "Restore tab") {
+  const primary = createActionButton("restore", primaryLabel, [
+    "M4.75 8.5V4.75H8.5",
+    "M5.2 7.65A8 8 0 1 1 4.4 14",
+  ]);
+  const close = createActionButton("close-tab", "Close tab", [
+    "M6.75 6.75 17.25 17.25",
+    "M17.25 6.75 6.75 17.25",
+  ]);
+
+  const actions = document.createElement("div");
+  actions.className = "tab-actions";
+  actions.append(primary, close);
+
+  primary.addEventListener("click", async () => {
+    primary.disabled = true;
+    close.disabled = true;
+    try {
+      await request({ type: "RESTORE_TAB", tabId: record.tabId ?? record.id, windowId: record.windowId });
+      window.close();
+    } catch (error) {
+      showNotice(error.message, true);
+      primary.disabled = false;
+      close.disabled = false;
+    }
+  });
+  close.addEventListener("click", async () => {
+    primary.disabled = true;
+    close.disabled = true;
+    try {
+      await request({ type: "CLOSE_TAB", tabId: record.tabId ?? record.id });
+      showNotice("Tab closed.");
+      await refresh();
+    } catch (error) {
+      showNotice(error.message, true);
+      primary.disabled = false;
+      close.disabled = false;
+    }
+  });
+  return actions;
 }
 
 function createTabRow(record) {
@@ -85,46 +141,74 @@ function createTabRow(record) {
   metadata.textContent = `${hostname(record.url)} · ${formatRelative(record.discardedAt)} · ${reasonLabel(record.reason)}${usage}${lastActive}`;
   copy.append(title, metadata);
 
-  const restore = createActionButton("restore", "Restore tab", [
-    "M4.75 8.5V4.75H8.5",
-    "M5.2 7.65A8 8 0 1 1 4.4 14",
-  ]);
-  const close = createActionButton("close-tab", "Close tab", [
-    "M6.75 6.75 17.25 17.25",
-    "M17.25 6.75 6.75 17.25",
-  ]);
-
-  const actions = document.createElement("div");
-  actions.className = "tab-actions";
-  actions.append(restore, close);
-
-  restore.addEventListener("click", async () => {
-    restore.disabled = true;
-    close.disabled = true;
-    try {
-      await request({ type: "RESTORE_TAB", tabId: record.tabId, windowId: record.windowId });
-      window.close();
-    } catch (error) {
-      showNotice(error.message, true);
-      restore.disabled = false;
-      close.disabled = false;
-    }
-  });
-  close.addEventListener("click", async () => {
-    restore.disabled = true;
-    close.disabled = true;
-    try {
-      await request({ type: "CLOSE_TAB", tabId: record.tabId });
-      showNotice("Tab closed.");
-      await refresh();
-    } catch (error) {
-      showNotice(error.message, true);
-      restore.disabled = false;
-      close.disabled = false;
-    }
-  });
-  row.append(icon, copy, actions);
+  row.append(icon, copy, createTabActions(record));
   return row;
+}
+
+function protectionLabel(reason) {
+  return {
+    tab: "Protected manually",
+    pinned: "Pinned tab",
+    audible: "Playing audio",
+    "special-page": "Special page",
+  }[reason.type] ?? (reason.type === "domain" ? `Protected domain: ${reason.domain}` : "Protected");
+}
+
+function createProtectedTabRow(tab) {
+  const row = document.createElement("article");
+  row.className = "tab-row";
+
+  let icon;
+  if (tab.favIconUrl) {
+    icon = document.createElement("img");
+    icon.src = tab.favIconUrl;
+    icon.alt = "";
+    icon.className = "favicon";
+  } else {
+    icon = document.createElement("span");
+    icon.className = "favicon fallback";
+    icon.textContent = (siteLabel(tab.url)[0] ?? "?").toUpperCase();
+  }
+
+  const copy = document.createElement("div");
+  copy.className = "tab-copy";
+  const title = document.createElement("div");
+  title.className = "tab-title";
+  title.textContent = tab.title || siteLabel(tab.url) || "Untitled tab";
+  title.title = title.textContent;
+  const metadata = document.createElement("div");
+  metadata.className = "tab-meta";
+  const lastAccessed = Number.isFinite(tab.lastAccessed)
+    ? `Last accessed ${formatRelative(tab.lastAccessed)}`
+    : "Last accessed unknown";
+  metadata.textContent = `${siteLabel(tab.url)} · ${lastAccessed} · ${tab.protectionReasons.map(protectionLabel).join(" · ")}`;
+  copy.append(title, metadata);
+  row.append(icon, copy, createTabActions(tab, "Switch to tab"));
+  return row;
+}
+
+function renderSelectedList() {
+  const sleeping = selectedView === "sleeping";
+  const records = sleeping ? popupState.discardedTabs : popupState.protectedTabs;
+  elements.sleepingView.classList.toggle("selected", sleeping);
+  elements.protectedView.classList.toggle("selected", !sleeping);
+  elements.sleepingView.setAttribute("aria-selected", String(sleeping));
+  elements.protectedView.setAttribute("aria-selected", String(!sleeping));
+  elements.sleepingView.tabIndex = sleeping ? 0 : -1;
+  elements.protectedView.tabIndex = sleeping ? -1 : 0;
+  elements.list.setAttribute("aria-labelledby", sleeping ? "sleeping-view" : "protected-view");
+  elements.list.replaceChildren();
+
+  if (!records.length) {
+    const empty = document.createElement("p");
+    empty.className = "empty";
+    empty.textContent = sleeping
+      ? "No tabs are currently discarded."
+      : "No open tabs are currently protected.";
+    elements.list.append(empty);
+    return;
+  }
+  elements.list.append(...records.map(sleeping ? createTabRow : createProtectedTabRow));
 }
 
 function render() {
@@ -133,16 +217,10 @@ function render() {
     ? `Automatic · after ${formatDuration(popupState.settings.inactivityMinutes * 60_000)}`
     : "Automatic discarding is off";
   elements.count.textContent = String(popupState.discardedTabs.length);
+  elements.sleepingViewCount.textContent = String(popupState.discardedTabs.length);
+  elements.protectedViewCount.textContent = String(popupState.protectedTabs.length);
   elements.lifetime.textContent = `${popupState.lifetimeDiscardCount} discarded by Memory Saver over time`;
-  elements.list.replaceChildren();
-  if (!popupState.discardedTabs.length) {
-    const empty = document.createElement("p");
-    empty.className = "empty";
-    empty.textContent = "No tabs are currently discarded.";
-    elements.list.append(empty);
-    return;
-  }
-  elements.list.append(...popupState.discardedTabs.map(createTabRow));
+  renderSelectedList();
 }
 
 function showNotice(message, error = false) {
@@ -186,5 +264,22 @@ elements.enabled.addEventListener("change", async () => {
 elements.discardWindow.addEventListener("click", () => runDiscard("DISCARD_ELIGIBLE_NOW"));
 elements.discardOthers.addEventListener("click", () => runDiscard("DISCARD_OTHER_TABS"));
 elements.settings.addEventListener("click", () => browser.runtime.openOptionsPage());
+
+function selectView(view) {
+  selectedView = view;
+  renderSelectedList();
+}
+
+elements.sleepingView.addEventListener("click", () => selectView("sleeping"));
+elements.protectedView.addEventListener("click", () => selectView("protected"));
+for (const button of [elements.sleepingView, elements.protectedView]) {
+  button.addEventListener("keydown", (event) => {
+    if (!["ArrowLeft", "ArrowRight"].includes(event.key)) return;
+    event.preventDefault();
+    const view = selectedView === "sleeping" ? "protected" : "sleeping";
+    selectView(view);
+    (view === "sleeping" ? elements.sleepingView : elements.protectedView).focus();
+  });
+}
 
 refresh().catch((error) => showNotice(error.message, true));

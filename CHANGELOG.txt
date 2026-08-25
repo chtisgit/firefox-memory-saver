@@ -1,0 +1,33 @@
+
+v0.2.0:
+* Added a Memory Saver submenu to the tab context menu.
+* Protect an individual tab with "Do not discard this tab". Per-tab protection
+  follows the tab across normal Firefox restarts and session restoration.
+* Protect a website with "Do not discard <domain>". This adds the domain to the
+  existing excluded-domain settings, and both context-menu actions can be
+  reversed with their corresponding "Allow discarding" action.
+* Added Sleeping tabs and Protected tabs views to the popup, with live counts
+  for both. Sleeping tabs remains selected by default.
+* The Protected tabs view lists every open tab protected by a manual rule,
+  protected domain, pinned-tab setting, audible-tab setting, or special-page
+  safety rule, together with its last-accessed time and applicable protection
+  reasons.
+* Increased the popup width to give tab titles and protection details more room.
+
+v0.1.2:
+* Manifest changes.
+
+v0.1.1:
+* Automatically unload inactive tabs after a configurable amount of time.
+* Choose how frequently Memory Saver checks for unused tabs.
+* Keep a minimum number of tabs loaded in each window.
+* Protect pinned tabs and tabs playing audio.
+* Protect specific websites and domains from being unloaded.
+* Manually unload eligible tabs across Firefox or only other tabs in the current window.
+* View all currently sleeping tabs in one convenient list.
+* Restore or close sleeping tabs directly from the popup.
+* Optionally record local foreground active-tab time with configurable retention.
+* Clear locally stored activity data at any time.
+* No advertisements, tracking, analytics, or data transmission.
+* No access to webpage contents.
+* Open-source software.

@@ -1,5 +1,5 @@
 import { loadState, normalizeSettings, saveState } from "../core/settings.js";
-import { selectEligibleByWindow } from "../core/eligibility.js";
+import { hostnameMatches, protectedHostname, protectionReasons, selectEligibleByWindow } from "../core/eligibility.js";
 import {
   checkpointUsage,
   clearUsage,
@@ -14,6 +14,11 @@ import {
 
 const SCAN_ALARM = "memory-saver-scan";
 const USAGE_ALARM = "memory-saver-usage-checkpoint";
+const TAB_PROTECTION_KEY = "memorySaverDoNotDiscard";
+const AUTO_DISCARD_MANAGED_KEY = "memorySaverManagesAutoDiscardable";
+const MENU_ROOT = "memory-saver-menu";
+const MENU_TAB_PROTECTION = "memory-saver-toggle-tab-protection";
+const MENU_DOMAIN_PROTECTION = "memory-saver-toggle-domain-protection";
 let state;
 let queue = Promise.resolve();
 let scanRunning = false;
@@ -26,6 +31,121 @@ function serialized(task) {
 
 async function persist() {
   state = await saveState(state);
+}
+
+function hostnameForMenu(urlValue) {
+  try {
+    const url = new URL(urlValue);
+    return ["http:", "https:"].includes(url.protocol) ? url.hostname.toLowerCase() : null;
+  } catch {
+    return null;
+  }
+}
+
+async function getTabBoolean(tabId, key) {
+  try {
+    return await browser.sessions.getTabValue(tabId, key) === true;
+  } catch {
+    return false;
+  }
+}
+
+async function setTabBoolean(tabId, key, value) {
+  if (value) {
+    await browser.sessions.setTabValue(tabId, key, true);
+  } else if (browser.sessions.removeTabValue) {
+    await browser.sessions.removeTabValue(tabId, key);
+  } else {
+    await browser.sessions.setTabValue(tabId, key, false);
+  }
+}
+
+async function reconcileTabDiscardability(tab) {
+  if (!Number.isInteger(tab?.id)) return false;
+  const [tabProtected, managed] = await Promise.all([
+    getTabBoolean(tab.id, TAB_PROTECTION_KEY),
+    getTabBoolean(tab.id, AUTO_DISCARD_MANAGED_KEY),
+  ]);
+  const domainProtected = Boolean(protectedHostname(tab.url, state.settings.protectedDomains));
+  const shouldProtect = tabProtected || domainProtected;
+
+  if (shouldProtect) {
+    if (tab.autoDiscardable !== false) await browser.tabs.update(tab.id, { autoDiscardable: false });
+    if (!managed) await setTabBoolean(tab.id, AUTO_DISCARD_MANAGED_KEY, true);
+  } else if (managed) {
+    await browser.tabs.update(tab.id, { autoDiscardable: true });
+    await setTabBoolean(tab.id, AUTO_DISCARD_MANAGED_KEY, false);
+  }
+  return tabProtected;
+}
+
+async function reconcileAllTabDiscardability() {
+  const tabs = await browser.tabs.query({});
+  await Promise.all(tabs.map((tab) => reconcileTabDiscardability(tab).catch((error) => {
+    console.warn(`Could not update discard protection for tab ${tab.id}`, error);
+  })));
+}
+
+async function tabsWithProtection(tabs) {
+  return Promise.all(tabs.map(async (tab) => ({
+    ...tab,
+    memorySaverProtected: await getTabBoolean(tab.id, TAB_PROTECTION_KEY),
+  })));
+}
+
+async function createContextMenus() {
+  await browser.menus.removeAll();
+  browser.menus.create({ id: MENU_ROOT, title: "Memory Saver", contexts: ["tab"] });
+  browser.menus.create({
+    id: MENU_TAB_PROTECTION,
+    parentId: MENU_ROOT,
+    title: "Do not discard this tab",
+    contexts: ["tab"],
+  });
+  browser.menus.create({
+    id: MENU_DOMAIN_PROTECTION,
+    parentId: MENU_ROOT,
+    title: "Do not discard this domain",
+    contexts: ["tab"],
+  });
+}
+
+async function updateContextMenus(tab) {
+  const hostname = hostnameForMenu(tab?.url);
+  const tabProtected = Number.isInteger(tab?.id) && await getTabBoolean(tab.id, TAB_PROTECTION_KEY);
+  const matchingDomain = hostname && state.settings.protectedDomains.find((domain) => hostnameMatches(hostname, domain));
+  const exactDomainProtected = matchingDomain === hostname;
+  await browser.menus.update(MENU_TAB_PROTECTION, {
+    title: tabProtected ? "Allow discarding this tab" : "Do not discard this tab",
+  });
+  await browser.menus.update(MENU_DOMAIN_PROTECTION, {
+    visible: Boolean(hostname),
+    enabled: !matchingDomain || exactDomainProtected,
+    title: exactDomainProtected
+      ? `Allow discarding ${hostname}`
+      : matchingDomain
+        ? `Protected by ${matchingDomain}`
+        : `Do not discard ${hostname ?? "this domain"}`,
+  });
+  await browser.menus.refresh();
+}
+
+async function toggleTabProtection(tab) {
+  if (!Number.isInteger(tab?.id)) return;
+  const protectedNow = await getTabBoolean(tab.id, TAB_PROTECTION_KEY);
+  await setTabBoolean(tab.id, TAB_PROTECTION_KEY, !protectedNow);
+  await reconcileTabDiscardability(await browser.tabs.get(tab.id));
+}
+
+async function toggleDomainProtection(tab) {
+  const hostname = hostnameForMenu(tab?.url);
+  if (!hostname) return;
+  const domains = state.settings.protectedDomains;
+  state.settings.protectedDomains = domains.includes(hostname)
+    ? domains.filter((domain) => domain !== hostname)
+    : [...domains, hostname];
+  await persist();
+  await reconcileAllTabDiscardability();
 }
 
 async function configureAlarms() {
@@ -76,6 +196,7 @@ async function reconcileRecords() {
   for (const [key, record] of Object.entries(state.liveUsageRecords)) {
     if (!liveIds.has(String(record.tabId)) && !record.currentSessionStartedAt) delete state.liveUsageRecords[key];
   }
+  return tabs;
 }
 
 async function discardTabs(tabs, reason) {
@@ -113,7 +234,7 @@ async function runScan({ ignoreInactivity = false, windowId, reason = "automatic
   if (scanRunning || (!state.settings.enabled && !ignoreInactivity)) return [];
   scanRunning = true;
   try {
-    const tabs = await browser.tabs.query(windowId == null ? {} : { windowId });
+    const tabs = await tabsWithProtection(await browser.tabs.query(windowId == null ? {} : { windowId }));
     const selected = selectEligibleByWindow(tabs, state.settings, Date.now(), { ignoreInactivity });
     return await discardTabs(selected, reason);
   } finally {
@@ -122,15 +243,20 @@ async function runScan({ ignoreInactivity = false, windowId, reason = "automatic
 }
 
 async function popupState() {
-  await reconcileRecords();
+  const tabs = await tabsWithProtection(await reconcileRecords());
   await persist();
   const now = Date.now();
   const discardedTabs = Object.values(state.discardRecords)
     .map((record) => ({ ...record, usage: usageSummaryForTab(state, record.tabKey, now) }))
     .sort((a, b) => b.discardedAt - a.discardedAt);
+  const protectedTabs = tabs
+    .map((tab) => ({ ...tab, protectionReasons: protectionReasons(tab, state.settings) }))
+    .filter((tab) => tab.protectionReasons.length)
+    .sort((a, b) => (b.lastAccessed ?? 0) - (a.lastAccessed ?? 0));
   return {
     settings: state.settings,
     discardedTabs,
+    protectedTabs,
     lifetimeDiscardCount: state.lifetimeDiscardCount,
   };
 }
@@ -159,6 +285,7 @@ async function handleMessage(message) {
       pruneUsage(state);
       await persist();
       await configureAlarms();
+      await reconcileAllTabDiscardability();
       if (!wasTracking && state.settings.usageTrackingEnabled) {
         await startFocusedTab();
         await persist();
@@ -177,6 +304,19 @@ async function handleMessage(message) {
 }
 
 browser.runtime.onMessage.addListener((message) => serialized(() => handleMessage(message)).catch((error) => ({ ok: false, error: error.message })));
+
+browser.runtime.onInstalled.addListener(() => {
+  createContextMenus().catch((error) => console.error("Could not create Memory Saver menus", error));
+});
+
+browser.menus.onShown.addListener((_info, tab) => {
+  serialized(() => updateContextMenus(tab));
+});
+
+browser.menus.onClicked.addListener((info, tab) => {
+  if (info.menuItemId === MENU_TAB_PROTECTION) serialized(() => toggleTabProtection(tab));
+  if (info.menuItemId === MENU_DOMAIN_PROTECTION) serialized(() => toggleDomainProtection(tab));
+});
 
 browser.alarms.onAlarm.addListener((alarm) => {
   serialized(async () => {
@@ -213,6 +353,7 @@ browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
         await startUsageSession(state, tab, now);
       }
     }
+    if (changeInfo.url) await reconcileTabDiscardability(tab);
     await persist();
   });
 });
@@ -235,6 +376,7 @@ browser.tabs.onReplaced.addListener((addedTabId, removedTabId) => {
       if (tab.active && state.settings.usageTrackingEnabled && await isWindowFocused(tab.windowId)) {
         await startUsageSession(state, tab, now);
       }
+      await reconcileTabDiscardability(tab);
     } catch {
       // Firefox may remove a replacement before its metadata can be queried.
     }
@@ -269,6 +411,7 @@ async function initialize() {
   recoverInterruptedUsage(state);
   pruneUsage(state);
   await reconcileRecords();
+  await reconcileAllTabDiscardability();
   await configureAlarms();
   await startFocusedTab();
   await persist();

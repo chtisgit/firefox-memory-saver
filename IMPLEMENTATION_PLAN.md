@@ -29,8 +29,10 @@ otherwise ineligible tab.
 - Automatic inactivity-based tab discarding.
 - Manual "Discard eligible tabs now" and "Discard other tabs" actions.
 - A list of currently discarded tabs in the popup.
+- A separate popup view listing currently protected tabs and their protection reasons.
 - Restore/focus action for each discarded tab.
 - Domain protection list.
+- A tab context-menu submenu for per-tab and per-domain protection.
 - Configurable inactivity threshold, scan interval, and minimum loaded-tab count.
 - Protection for active, pinned, audible, and special Firefox pages.
 - Persistent settings and discard history for the current open tabs.
@@ -107,7 +109,7 @@ The manifest will define:
 - a Firefox background script;
 - `options_ui` for the settings page;
 - `browser_specific_settings.gecko` with a stable extension ID; and
-- permissions: `tabs`, `alarms`, `storage`, and `sessions`.
+- permissions: `tabs`, `alarms`, `storage`, `sessions`, and `menus`.
 
 No host permissions or content scripts will be requested. The extension can
 therefore manage tab metadata without reading or modifying page content.
@@ -118,7 +120,9 @@ Permission usage:
 - `alarms`: run the inactivity scan and usage checkpoint periodically;
 - `storage`: persist settings, discard records, and bounded usage history; and
 - `sessions`: attach an opaque extension-owned identity to each tab so restored
-  tabs can be recognized without confusing reused numeric tab IDs.
+  tabs can be recognized without confusing reused numeric tab IDs, and retain
+  per-tab discard protection across normal session restoration; and
+- `menus`: expose tab and domain discard protection in the tab context menu.
 
 ## 6. Data model
 
