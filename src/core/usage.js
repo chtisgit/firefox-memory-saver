@@ -1,17 +1,30 @@
 const TAB_KEY = "memorySaverTabKey";
 const MAX_SESSIONS = 10_000;
+const keyOwners = new Map();
+const tabKeys = new Map();
 
 function createKey() {
   return globalThis.crypto?.randomUUID?.() ?? `tab-${Date.now()}-${Math.random().toString(36).slice(2)}`;
 }
 
-export async function getTabKey(tabId) {
+export async function getTabKey(tabId, create = true) {
+  if (tabKeys.has(tabId)) return tabKeys.get(tabId);
   let key = await browser.sessions.getTabValue(tabId, TAB_KEY);
-  if (!key) {
+  if ((!key && create) || (key && keyOwners.has(key) && keyOwners.get(key) !== tabId)) {
     key = createKey();
     await browser.sessions.setTabValue(tabId, TAB_KEY, key);
   }
+  if (key) {
+    keyOwners.set(key, tabId);
+    tabKeys.set(tabId, key);
+  }
   return key;
+}
+
+export function releaseTabKey(tabId) {
+  const key = tabKeys.get(tabId);
+  if (keyOwners.get(key) === tabId) keyOwners.delete(key);
+  tabKeys.delete(tabId);
 }
 
 export function pruneUsage(state, now = Date.now()) {
@@ -104,10 +117,11 @@ export function clearUsage(state) {
 
 export function usageSummaryForTab(state, tabKey, now = Date.now()) {
   if (!tabKey) return { totalActiveMs: 0, lastActivatedAt: null };
+  const cutoff = now - state.settings.usageHistoryDays * 86_400_000;
   const live = state.liveUsageRecords[tabKey];
-  const completed = state.usageSessions.filter((session) => session.tabKey === tabKey);
-  const completedTotal = completed.reduce((sum, session) => sum + session.durationMs, 0);
-  const openTotal = live?.currentSessionStartedAt ? now - live.currentSessionStartedAt : 0;
+  const completed = state.usageSessions.filter((session) => session.tabKey === tabKey && session.endedAt >= cutoff);
+  const completedTotal = completed.reduce((sum, session) => sum + Math.max(0, session.endedAt - Math.max(session.startedAt, cutoff)), 0);
+  const openTotal = live?.currentSessionStartedAt ? Math.max(0, now - Math.max(live.currentSessionStartedAt, cutoff)) : 0;
   const latestCompleted = completed.reduce((latest, session) => Math.max(latest, session.startedAt), 0);
   return {
     totalActiveMs: completedTotal + openTotal,

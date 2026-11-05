@@ -13,6 +13,11 @@
         <p class="subtitle" id="status-copy">Loading…</p>
       </div>
       <div class="header-controls">
+        <button id="open-window" class="header-button" type="button" aria-label="Open in a separate window" title="Open in a separate window" disabled>
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M13 5h6v6M19 5l-9 9M19 14v4a1 1 0 0 1-1 1H6a1 1 0 0 1-1-1V6a1 1 0 0 1 1-1h4"/>
+          </svg>
+        </button>
         <button id="settings" class="settings-button" aria-label="Open settings" title="Settings">
           <svg viewBox="0 0 24 24" aria-hidden="true">
             <path d="M9.55 3.25h4.9l.52 2.07c.55.23 1.06.53 1.53.89l2.05-.59L21 9.86l-1.53 1.48a8.2 8.2 0 0 1 0 1.32L21 14.14l-2.45 4.24-2.05-.59c-.47.36-.98.66-1.53.89l-.52 2.07h-4.9l-.52-2.07a7.8 7.8 0 0 1-1.53-.89l-2.05.59L3 14.14l1.53-1.48a8.2 8.2 0 0 1 0-1.32L3 9.86l2.45-4.24 2.05.59c.47-.36.98-.66 1.53-.89l.52-2.07Z"/>
@@ -27,21 +32,41 @@
     </header>
 
     <main>
-      <section class="summary" aria-labelledby="summary-title">
-        <div class="summary-copy">
-          <h2 id="summary-title">Sleeping tabs</h2>
-          <span id="lifetime-count"></span>
-        </div>
-        <strong id="discarded-count">—</strong>
-      </section>
+      <div class="overview">
+        <section class="summary" aria-labelledby="summary-title">
+          <strong id="discarded-count">—</strong>
+          <div class="summary-copy">
+            <h2 id="summary-title">Sleeping tabs</h2>
+            <span id="lifetime-count"></span>
+          </div>
+        </section>
 
-      <section class="actions" aria-label="Tab actions">
-        <button id="discard-window" class="primary">Discard eligible now</button>
-        <button id="discard-others">Discard other tabs</button>
-      </section>
+        <section class="actions" aria-label="Tab actions">
+          <button id="discard-window" class="primary">Discard eligible now</button>
+          <button id="discard-others">Discard other tabs</button>
+        </section>
+      </div>
 
       <p id="notice" class="notice" role="status" aria-live="polite"></p>
 
+      <hr class="section-divider">
+      <section class="tab-protection" aria-labelledby="current-tab-title">
+        <h2 id="current-tab-title">This Tab</h2>
+        <div class="current-tab-address">
+          <img id="current-tab-icon" class="current-tab-icon" alt="" hidden>
+          <span id="current-tab-page-title"></span>
+          <span aria-hidden="true">·</span>
+          <span id="current-tab-url"></span>
+        </div>
+        <div class="current-tab-details">
+          <p id="current-tab-sleep" class="muted"></p>
+          <p id="current-tab-usage" class="muted" hidden></p>
+        </div>
+        <button id="protect-tab" type="button" aria-describedby="tab-protection-status" hidden disabled>Protect this Tab</button>
+        <p id="tab-protection-status" class="muted" role="status" hidden></p>
+      </section>
+
+      <hr class="section-divider">
       <section aria-label="Open tab status">
         <div class="view-tabs" role="tablist" aria-label="Tab lists">
           <button id="sleeping-view" class="view-tab selected" type="button" role="tab" aria-selected="true" aria-controls="tab-list">

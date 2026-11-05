@@ -1,6 +1,6 @@
 import { inspectEligibility, protectedHostname, protectionReasons, selectEligibleTabs } from "../src/core/eligibility.js";
 import { DEFAULT_SETTINGS, normalizeDomain, normalizeSettings } from "../src/core/settings.js";
-import { endLiveRecord, pruneUsage, recoverInterruptedUsage } from "../src/core/usage.js";
+import { endLiveRecord, getTabKey, pruneUsage, recoverInterruptedUsage, releaseTabKey, usageSummaryForTab } from "../src/core/usage.js";
 
 const tests = [];
 const test = (name, callback) => tests.push({ name, callback });
@@ -120,17 +120,63 @@ test("prunes expired usage sessions", () => {
   equal(state.usageSessions.length, 1);
 });
 
+test("usage summary limits completed and ongoing sessions to the history window", () => {
+  const day = 86_400_000;
+  const now = 10 * day;
+  const state = {
+    settings: { usageHistoryDays: 2 },
+    usageSessions: [
+      { tabKey: "a", startedAt: 7 * day, endedAt: 8.5 * day },
+      { tabKey: "a", startedAt: 9 * day, endedAt: 9.25 * day },
+      { tabKey: "b", startedAt: 9 * day, endedAt: now },
+    ],
+    liveUsageRecords: { a: { currentSessionStartedAt: 9.5 * day } },
+  };
+  equal(usageSummaryForTab(state, "a", now).totalActiveMs, 1.25 * day);
+});
+
+test("duplicate tab identities are separated while restored identities are retained", async () => {
+  const values = new Map([[101, "original"], [102, "original"], [103, "restored"]]);
+  globalThis.browser = { sessions: {
+    async getTabValue(id) { return values.get(id); },
+    async setTabValue(id, _key, value) { values.set(id, value); },
+  } };
+  try {
+    equal(await getTabKey(101, false), "original");
+    const duplicateKey = await getTabKey(102, false);
+    equal(duplicateKey !== "original", true);
+    equal(values.get(102), duplicateKey);
+    const state = {
+      settings: { usageHistoryDays: 1 },
+      liveUsageRecords: {},
+      usageSessions: [{ tabKey: "original", startedAt: 100, endedAt: 200 }],
+    };
+    equal(usageSummaryForTab(state, "original", 300).totalActiveMs, 100);
+    equal(usageSummaryForTab(state, duplicateKey, 300).totalActiveMs, 0);
+    equal(await getTabKey(103, false), "restored");
+    releaseTabKey(103);
+    values.set(104, "restored");
+    equal(await getTabKey(104, false), "restored");
+    equal(await getTabKey(105, false), undefined);
+  } finally {
+    for (const id of [101, 102, 103, 104, 105]) releaseTabKey(id);
+    delete globalThis.browser;
+  }
+});
+
 test("background module loads against the Firefox API contract", async () => {
   const event = { addListener() {} };
+  let onMessage;
   globalThis.browser = {
     storage: { local: { async get() { return {}; }, async set() {} } },
     alarms: { async clear() {}, create() {}, onAlarm: event },
-    runtime: { onMessage: event, onInstalled: event },
+    runtime: { onMessage: { addListener(listener) { onMessage = listener; } }, onInstalled: event },
     tabs: {
       async query() { return []; },
       async update() {},
       async remove() {},
       onActivated: event,
+      onCreated: event,
       onUpdated: event,
       onRemoved: event,
       onReplaced: event,
@@ -160,6 +206,7 @@ test("background module loads against the Firefox API contract", async () => {
   console.error = (...values) => errors.push(values);
   try {
     await import("../src/background/index.js");
+    equal((await onMessage({ type: "GET_SETTINGS" })).ok, true);
     equal(errors.length, 0);
   } finally {
     console.error = originalError;

@@ -9,15 +9,40 @@ const elements = {
   sleepingViewCount: document.querySelector("#sleeping-view-count"),
   protectedViewCount: document.querySelector("#protected-view-count"),
   lifetime: document.querySelector("#lifetime-count"),
+  main: document.querySelector("main"),
   list: document.querySelector("#tab-list"),
   notice: document.querySelector("#notice"),
   discardWindow: document.querySelector("#discard-window"),
   discardOthers: document.querySelector("#discard-others"),
+  currentTabIcon: document.querySelector("#current-tab-icon"),
+  currentTabPageTitle: document.querySelector("#current-tab-page-title"),
+  currentTabUrl: document.querySelector("#current-tab-url"),
+  currentTabSleep: document.querySelector("#current-tab-sleep"),
+  currentTabUsage: document.querySelector("#current-tab-usage"),
+  protectTab: document.querySelector("#protect-tab"),
+  protectionStatus: document.querySelector("#tab-protection-status"),
+  openWindow: document.querySelector("#open-window"),
   settings: document.querySelector("#settings"),
 };
 
 let popupState;
 let selectedView = "sleeping";
+const windowParams = new URLSearchParams(window.location.search);
+const standalone = windowParams.has("window");
+const targetTabId = standalone && /^\d+$/.test(windowParams.get("tab") ?? "")
+  ? Number(windowParams.get("tab"))
+  : null;
+if (standalone) document.documentElement.classList.add("window-view");
+
+function sizeTabList() {
+  if (standalone) return;
+  const availableHeight = Math.min(600, screen.availHeight);
+  const listTop = elements.list.getBoundingClientRect().top;
+  const bottomPadding = parseFloat(getComputedStyle(elements.main).paddingBottom) || 0;
+  const height = Math.max(0, Math.min(330, Math.floor(availableHeight - listTop - bottomPadding)));
+  const maxHeight = `${height}px`;
+  if (elements.list.style.maxHeight !== maxHeight) elements.list.style.maxHeight = maxHeight;
+}
 
 async function request(message) {
   const response = await browser.runtime.sendMessage(message);
@@ -138,7 +163,10 @@ function createTabRow(record) {
   const lastActive = popupState.settings.usageTrackingEnabled && record.usage?.lastActivatedAt
     ? ` · Last active ${formatRelative(record.usage.lastActivatedAt)}`
     : "";
-  metadata.textContent = `${hostname(record.url)} · ${formatRelative(record.discardedAt)} · ${reasonLabel(record.reason)}${usage}${lastActive}`;
+  const site = document.createElement("span");
+  site.className = "tab-url";
+  site.textContent = hostname(record.url);
+  metadata.append(site, ` · ${Number.isFinite(record.discardedAt) ? formatRelative(record.discardedAt) : "Sleep time unknown"} · ${reasonLabel(record.reason)}${usage}${lastActive}`);
   copy.append(title, metadata);
 
   row.append(icon, copy, createTabActions(record));
@@ -181,7 +209,10 @@ function createProtectedTabRow(tab) {
   const lastAccessed = Number.isFinite(tab.lastAccessed)
     ? `Last accessed ${formatRelative(tab.lastAccessed)}`
     : "Last accessed unknown";
-  metadata.textContent = `${siteLabel(tab.url)} · ${lastAccessed} · ${tab.protectionReasons.map(protectionLabel).join(" · ")}`;
+  const site = document.createElement("span");
+  site.className = "tab-url";
+  site.textContent = siteLabel(tab.url);
+  metadata.append(site, ` · ${lastAccessed} · ${tab.protectionReasons.map(protectionLabel).join(" · ")}`);
   copy.append(title, metadata);
   row.append(icon, copy, createTabActions(tab, "Switch to tab"));
   return row;
@@ -220,29 +251,64 @@ function render() {
   elements.sleepingViewCount.textContent = String(popupState.discardedTabs.length);
   elements.protectedViewCount.textContent = String(popupState.protectedTabs.length);
   elements.lifetime.textContent = `${popupState.lifetimeDiscardCount} discarded by Memory Saver over time`;
+  const currentTab = popupState.currentTab;
+  elements.openWindow.disabled = !currentTab;
+  elements.discardOthers.disabled = !currentTab;
+  const reasons = currentTab?.protectionReasons ?? [];
+  elements.currentTabPageTitle.textContent = currentTab?.title || "Untitled tab";
+  elements.currentTabPageTitle.title = currentTab?.title || "";
+  elements.currentTabUrl.textContent = currentTab?.url || "URL unavailable";
+  elements.currentTabUrl.title = currentTab?.url || "";
+  const sleep = currentTab?.lastSleep;
+  const sleepTime = Number.isFinite(sleep?.discardedAt) ? formatRelative(sleep.discardedAt) : "Time unknown";
+  elements.currentTabSleep.textContent = !currentTab ? "Last slept: Unknown" : sleep
+    ? `Last slept: ${sleepTime} · Cause: ${reasonLabel(sleep.reason)}`
+    : "Last slept: No recorded sleep";
+  elements.currentTabSleep.title = Number.isFinite(sleep?.discardedAt) ? new Date(sleep.discardedAt).toLocaleString() : "";
+  elements.currentTabUsage.hidden = !currentTab || !popupState.settings.usageTrackingEnabled;
+  const days = popupState.settings.usageHistoryDays;
+  elements.currentTabUsage.textContent = currentTab?.usage
+    ? `Active time: ${formatDuration(currentTab.usage.totalActiveMs)} in the last ${days} day${days === 1 ? "" : "s"}`
+    : "Active time: Unknown";
+  elements.currentTabIcon.hidden = !currentTab?.favIconUrl;
+  if (currentTab?.favIconUrl) elements.currentTabIcon.src = currentTab.favIconUrl;
+  else elements.currentTabIcon.removeAttribute("src");
+  elements.protectTab.disabled = !currentTab;
+  elements.protectTab.hidden = !currentTab || reasons.some((reason) => reason.type !== "tab");
+  elements.protectTab.textContent = currentTab?.memorySaverProtected
+    ? "Allow discarding this Tab"
+    : "Protect this Tab";
+  elements.protectionStatus.hidden = !reasons.length;
+  elements.protectionStatus.textContent = reasons.length
+    ? `This tab is currently protected. ${reasons.map(protectionLabel).join(" · ")}.${reasons.some((reason) => reason.type === "tab") ? " Manual protection only applies to this tab and is preserved until the tab is closed." : ""}`
+    : "";
   renderSelectedList();
+  sizeTabList();
 }
 
 function showNotice(message, error = false) {
   elements.notice.textContent = message;
   elements.notice.classList.toggle("error", error);
+  sizeTabList();
 }
 
 async function refresh() {
-  popupState = await request({ type: "GET_POPUP_STATE" });
+  popupState = await request({ type: "GET_POPUP_STATE", ...(standalone ? { targetTabId } : {}) });
   render();
 }
 
 async function runDiscard(type) {
+  if (type === "DISCARD_OTHER_TABS" && !Number.isInteger(popupState?.currentTab?.windowId)) {
+    showNotice("The original tab is no longer available.", true);
+    return;
+  }
   elements.discardWindow.disabled = true;
   elements.discardOthers.disabled = true;
   showNotice("Checking tabs…");
   try {
-    const [active] = await browser.tabs.query({ active: true, currentWindow: true });
     const ids = await request({
       type,
-      windowId: type === "DISCARD_OTHER_TABS" ? active?.windowId : undefined,
-      activeTabId: active?.id,
+      windowId: type === "DISCARD_OTHER_TABS" ? popupState?.currentTab?.windowId : undefined,
     });
     showNotice(ids.length ? `Discarded ${ids.length} tab${ids.length === 1 ? "" : "s"}.` : "No eligible tabs found.");
     await refresh();
@@ -250,7 +316,7 @@ async function runDiscard(type) {
     showNotice(error.message, true);
   } finally {
     elements.discardWindow.disabled = false;
-    elements.discardOthers.disabled = false;
+    elements.discardOthers.disabled = !popupState?.currentTab;
   }
 }
 
@@ -261,6 +327,44 @@ elements.enabled.addEventListener("change", async () => {
     render();
   } catch (error) { showNotice(error.message, true); }
 });
+elements.currentTabIcon.addEventListener("error", () => { elements.currentTabIcon.hidden = true; });
+elements.openWindow.addEventListener("click", async () => {
+  const tabId = popupState?.currentTab?.id;
+  if (!Number.isInteger(tabId)) return;
+  elements.openWindow.disabled = true;
+  try {
+    const url = new URL(browser.runtime.getURL("src/popup/index.html"));
+    url.searchParams.set("window", "1");
+    url.searchParams.set("tab", String(tabId));
+    const width = Math.min(500, screen.availWidth);
+    const height = Math.min(800, screen.availHeight);
+    await browser.windows.create({
+      url: url.href,
+      type: "popup",
+      width,
+      height,
+      left: screen.availLeft + Math.max(0, screen.availWidth - width - 24),
+      top: screen.availTop + Math.floor((screen.availHeight - height) / 2),
+    });
+    window.close();
+  } catch (error) {
+    showNotice(error.message, true);
+    elements.openWindow.disabled = false;
+  }
+});
+elements.protectTab.addEventListener("click", async () => {
+  const tabId = popupState?.currentTab?.id;
+  if (!Number.isInteger(tabId)) return;
+  elements.protectTab.disabled = true;
+  try {
+    await request({ type: "TOGGLE_TAB_PROTECTION", tabId });
+    await refresh();
+  } catch (error) {
+    showNotice(error.message, true);
+  } finally {
+    elements.protectTab.disabled = !popupState?.currentTab;
+  }
+});
 elements.discardWindow.addEventListener("click", () => runDiscard("DISCARD_ELIGIBLE_NOW"));
 elements.discardOthers.addEventListener("click", () => runDiscard("DISCARD_OTHER_TABS"));
 elements.settings.addEventListener("click", () => browser.runtime.openOptionsPage());
@@ -268,6 +372,7 @@ elements.settings.addEventListener("click", () => browser.runtime.openOptionsPag
 function selectView(view) {
   selectedView = view;
   renderSelectedList();
+  sizeTabList();
 }
 
 elements.sleepingView.addEventListener("click", () => selectView("sleeping"));
@@ -280,6 +385,12 @@ for (const button of [elements.sleepingView, elements.protectedView]) {
     selectView(view);
     (view === "sleeping" ? elements.sleepingView : elements.protectedView).focus();
   });
+}
+
+if (!standalone) {
+  const resizeObserver = new ResizeObserver(sizeTabList);
+  resizeObserver.observe(elements.main);
+  window.addEventListener("resize", sizeTabList);
 }
 
 refresh().catch((error) => showNotice(error.message, true));

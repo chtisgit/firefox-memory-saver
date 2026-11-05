@@ -17,6 +17,8 @@ ordinary text Git objects.
 - A tab context-menu submenu for protecting one tab or its entire domain.
 - A minimum number of loaded tabs retained independently in each window.
 - Popup views listing sleeping and protected tabs, with live counts for both.
+- A separate resizable window with last-sleep and optional active-time details
+  when its content area is taller than 600 pixels.
 - Popup actions for discarding eligible tabs and restoring discarded tabs.
 - Reconciliation with tabs discarded by Firefox or other extensions.
 - Optional foreground active-tab session tracking, disabled by default.
@@ -55,6 +57,9 @@ archive is unsigned; AMO signing is required for normal Firefox installation.
 The extension does not transmit data and does not inject scripts into webpages.
 Its settings and discard records stay in `browser.storage.local`. Per-tab discard
 protection is stored in Firefox session data so it follows a normally restored tab.
+The most recent observed sleep time and cause are also stored in the tab's Firefox
+session data, independently of optional usage tracking. If a tab is discovered
+already asleep, its actual sleep time is unknown.
 
 Detailed foreground activity tracking is optional and off by default. If enabled,
 the extension stores URLs, titles, timestamps, and foreground durations locally

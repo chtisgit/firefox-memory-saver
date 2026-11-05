@@ -7,6 +7,7 @@ import {
   endUsageForWindow,
   getTabKey,
   pruneUsage,
+  releaseTabKey,
   recoverInterruptedUsage,
   startUsageSession,
   usageSummaryForTab,
@@ -16,6 +17,7 @@ const SCAN_ALARM = "memory-saver-scan";
 const USAGE_ALARM = "memory-saver-usage-checkpoint";
 const TAB_PROTECTION_KEY = "memorySaverDoNotDiscard";
 const AUTO_DISCARD_MANAGED_KEY = "memorySaverManagesAutoDiscardable";
+const LAST_SLEEP_KEY = "memorySaverLastSleep";
 const MENU_ROOT = "memory-saver-menu";
 const MENU_TAB_PROTECTION = "memory-saver-toggle-tab-protection";
 const MENU_DOMAIN_PROTECTION = "memory-saver-toggle-domain-protection";
@@ -171,6 +173,14 @@ async function startFocusedTab(now = Date.now()) {
   if (tab && await isWindowFocused(tab.windowId)) await startUsageSession(state, tab, now);
 }
 
+async function saveLastSleep(tabId, sleep) {
+  try {
+    await browser.sessions.setTabValue(tabId, LAST_SLEEP_KEY, sleep);
+  } catch (error) {
+    console.warn(`Could not save last sleep for tab ${tabId}`, error);
+  }
+}
+
 async function reconcileRecords() {
   const tabs = await browser.tabs.query({});
   const liveIds = new Set(tabs.map((tab) => String(tab.id)));
@@ -187,10 +197,11 @@ async function reconcileRecords() {
         title: tab.title ?? "",
         url: tab.url ?? "",
         favIconUrl: tab.favIconUrl,
-        discardedAt: Date.now(),
+        discardedAt: null,
         lastAccessedAt: tab.lastAccessed,
         reason: "external",
       };
+      await saveLastSleep(tab.id, { discardedAt: null, reason: "external" });
     }
   }
   for (const [key, record] of Object.entries(state.liveUsageRecords)) {
@@ -206,6 +217,8 @@ async function discardTabs(tabs, reason) {
       await browser.tabs.discard(tab.id);
       const confirmed = await browser.tabs.get(tab.id);
       if (!confirmed.discarded) continue;
+      const discardedAt = Date.now();
+      await saveLastSleep(tab.id, { discardedAt, reason });
       let tabKey;
       if (state.settings.usageTrackingEnabled) tabKey = await getTabKey(tab.id);
       state.discardRecords[String(tab.id)] = {
@@ -215,7 +228,7 @@ async function discardTabs(tabs, reason) {
         title: tab.title ?? "",
         url: tab.url ?? "",
         favIconUrl: tab.favIconUrl,
-        discardedAt: Date.now(),
+        discardedAt,
         lastAccessedAt: tab.lastAccessed,
         reason,
       };
@@ -242,10 +255,26 @@ async function runScan({ ignoreInactivity = false, windowId, reason = "automatic
   }
 }
 
-async function popupState() {
+async function popupState(targetTabId) {
   const tabs = await tabsWithProtection(await reconcileRecords());
   await persist();
+  const [activeTab] = targetTabId === undefined ? await browser.tabs.query({ active: true, currentWindow: true }) : [];
+  const currentTab = tabs.find((tab) => tab.id === (targetTabId === undefined ? activeTab?.id : targetTabId));
   const now = Date.now();
+  let currentTabDetails = null;
+  if (currentTab) {
+    let lastSleep = null;
+    let usage = null;
+    try {
+      lastSleep = await browser.sessions.getTabValue(currentTab.id, LAST_SLEEP_KEY);
+      if (state.settings.usageTrackingEnabled) {
+        usage = usageSummaryForTab(state, await getTabKey(currentTab.id), now);
+      }
+    } catch (error) {
+      console.warn(`Could not read tab details for ${currentTab.id}`, error);
+    }
+    currentTabDetails = { ...currentTab, protectionReasons: protectionReasons(currentTab, state.settings), lastSleep, usage };
+  }
   const discardedTabs = Object.values(state.discardRecords)
     .map((record) => ({ ...record, usage: usageSummaryForTab(state, record.tabKey, now) }))
     .sort((a, b) => b.discardedAt - a.discardedAt);
@@ -257,6 +286,7 @@ async function popupState() {
     settings: state.settings,
     discardedTabs,
     protectedTabs,
+    currentTab: currentTabDetails,
     lifetimeDiscardCount: state.lifetimeDiscardCount,
   };
 }
@@ -264,11 +294,14 @@ async function popupState() {
 async function handleMessage(message) {
   switch (message?.type) {
     case "GET_POPUP_STATE":
-      return { ok: true, data: await popupState() };
+      return { ok: true, data: await popupState(message.targetTabId) };
     case "DISCARD_ELIGIBLE_NOW":
       return { ok: true, data: await runScan({ ignoreInactivity: true, windowId: message.windowId, reason: "manual-eligible" }) };
     case "DISCARD_OTHER_TABS":
       return { ok: true, data: await runScan({ ignoreInactivity: true, windowId: message.windowId, reason: "manual-others" }) };
+    case "TOGGLE_TAB_PROTECTION":
+      await toggleTabProtection(await browser.tabs.get(message.tabId));
+      return { ok: true };
     case "RESTORE_TAB":
       await browser.windows.update(message.windowId, { focused: true });
       await browser.tabs.update(message.tabId, { active: true });
@@ -340,12 +373,29 @@ browser.tabs.onActivated.addListener((info) => {
   });
 });
 
+browser.tabs.onCreated.addListener((tab) => {
+  serialized(async () => {
+    if (!Number.isInteger(tab.id)) return;
+    await getTabKey(tab.id, false);
+  });
+});
+
 browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   if (!("discarded" in changeInfo) && !("url" in changeInfo)) return;
   serialized(async () => {
     const now = Date.now();
     if (changeInfo.discarded === false) delete state.discardRecords[String(tabId)];
-    if (changeInfo.discarded === true) endUsageForTab(state, tabId, now, "discarded");
+    if (changeInfo.discarded === true) {
+      if (!state.discardRecords[String(tabId)]) {
+        state.discardRecords[String(tabId)] = {
+          tabId, windowId: tab.windowId, title: tab.title ?? "", url: tab.url ?? "",
+          favIconUrl: tab.favIconUrl, discardedAt: now, lastAccessedAt: tab.lastAccessed,
+          reason: "external",
+        };
+        await saveLastSleep(tabId, { discardedAt: now, reason: "external" });
+      }
+      endUsageForTab(state, tabId, now, "discarded");
+    }
     if (changeInfo.url && state.settings.usageTrackingEnabled) {
       const activeRecord = Object.values(state.liveUsageRecords).find((record) => record.tabId === tabId && record.currentSessionStartedAt);
       if (activeRecord) {
@@ -362,6 +412,7 @@ browser.tabs.onRemoved.addListener((tabId) => {
   serialized(async () => {
     delete state.discardRecords[String(tabId)];
     endUsageForTab(state, tabId, Date.now(), "tab-closed", true);
+    releaseTabKey(tabId);
     await persist();
   });
 });
@@ -371,6 +422,7 @@ browser.tabs.onReplaced.addListener((addedTabId, removedTabId) => {
     const now = Date.now();
     delete state.discardRecords[String(removedTabId)];
     endUsageForTab(state, removedTabId, now, "navigation", true);
+    releaseTabKey(removedTabId);
     try {
       const tab = await browser.tabs.get(addedTabId);
       if (tab.active && state.settings.usageTrackingEnabled && await isWindowFocused(tab.windowId)) {
@@ -408,6 +460,14 @@ browser.windows.onRemoved.addListener((windowId) => {
 
 async function initialize() {
   state = await loadState();
+  const tabs = await browser.tabs.query({});
+  for (const tab of tabs.filter((item) => Number.isInteger(item.id)).sort((a, b) => a.id - b.id)) {
+    try {
+      await getTabKey(tab.id, false);
+    } catch (error) {
+      console.warn(`Could not check tab identity for ${tab.id}`, error);
+    }
+  }
   recoverInterruptedUsage(state);
   pruneUsage(state);
   await reconcileRecords();
