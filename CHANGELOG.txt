@@ -1,3 +1,35 @@
+v0.3.0:
+* Automatic discarding now keeps more tabs loaded for the same "Keep at least"
+  setting: active and protected tabs no longer count toward either minimum.
+  For example, a per-window minimum of 2 now keeps 2 inactive, unprotected tabs
+  loaded in addition to the active tab and any protected tabs. This change also
+  applies to manual discarding.
+* Add a This Tab section showing the page title, favicon, URL, protection status,
+  and a button to protect or unprotect the current tab.
+* Show when the current tab last went to sleep and, when activity recording is
+  enabled, how much time it has been active.
+* Make the popup more compact and prevent long sleeping/protected tab lists
+  from overflowing it.
+* Add a minimum number of tabs to keep loaded across all windows, alongside the
+  per-window minimum. Both minimums can now be set to zero.
+* Replace the two discard buttons with "Discard N now", showing how many tabs
+  can be discarded across all windows. Hide the button when none are eligible.
+  Manual discarding respects protections and minimums but does not wait for
+  the inactivity timeout.
+* Show a message when Firefox refuses to discard tabs or discarding fails.
+* Choose how often to check for unused tabs automatically, based on the
+  "Discard tabs after" setting, instead of requiring a separate setting.
+* Add Restore Default Settings and ask for confirmation before clearing
+  recorded activity data. Show allowed input ranges beside settings labels.
+* Change the default activity-history retention to 14 days and allow up to
+  365 days. Keep existing saved preferences.
+* Improve active-time totals so duplicated tabs have their own history and
+  totals cover only the selected history period.
+* Expand optional local activity recording to include when and how often tabs
+  go to sleep, preparing for browsing-history review tools in a future release.
+  Recording remains off by default; review pages are not included yet.
+* Drop Firefox for Android support: the extension does not appear to work well
+  there, and Android already seems to unload tabs more aggressively.
 
 v0.2.0:
 * Added a Memory Saver submenu to the tab context menu.
