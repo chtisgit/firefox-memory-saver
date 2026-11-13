@@ -4,8 +4,9 @@ export const DEFAULT_SETTINGS = Object.freeze({
   schemaVersion: 1,
   enabled: true,
   inactivityMinutes: 10,
-  scanIntervalMinutes: 3,
+  scanIntervalMinutes: 1,
   minimumLoadedTabsPerWindow: 2,
+  minimumLoadedTabsTotal: 0,
   protectPinned: true,
   protectAudible: true,
   protectedDomains: [],
@@ -16,14 +17,19 @@ export const DEFAULT_SETTINGS = Object.freeze({
 const limits = {
   inactivityMinutes: [5, 1440],
   scanIntervalMinutes: [1, 60],
-  minimumLoadedTabsPerWindow: [1, 20],
-  usageHistoryDays: [1, 30],
+  minimumLoadedTabsPerWindow: [0, 20],
+  minimumLoadedTabsTotal: [0, 100],
+  usageHistoryDays: [1, 365],
 };
 
 function boundedInteger(value, fallback, [minimum, maximum]) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.min(maximum, Math.max(minimum, Math.round(parsed)));
+}
+
+export function calculateScanInterval(inactivityMinutes) {
+  return Math.min(60, Math.ceil(inactivityMinutes / 20));
 }
 
 export function normalizeDomain(value) {
@@ -50,6 +56,7 @@ export function normalizeSettings(value = {}) {
     inactivityMinutes: boundedInteger(value.inactivityMinutes, DEFAULT_SETTINGS.inactivityMinutes, limits.inactivityMinutes),
     scanIntervalMinutes: boundedInteger(value.scanIntervalMinutes, DEFAULT_SETTINGS.scanIntervalMinutes, limits.scanIntervalMinutes),
     minimumLoadedTabsPerWindow: boundedInteger(value.minimumLoadedTabsPerWindow, DEFAULT_SETTINGS.minimumLoadedTabsPerWindow, limits.minimumLoadedTabsPerWindow),
+    minimumLoadedTabsTotal: boundedInteger(value.minimumLoadedTabsTotal, DEFAULT_SETTINGS.minimumLoadedTabsTotal, limits.minimumLoadedTabsTotal),
     protectPinned: typeof value.protectPinned === "boolean" ? value.protectPinned : DEFAULT_SETTINGS.protectPinned,
     protectAudible: typeof value.protectAudible === "boolean" ? value.protectAudible : DEFAULT_SETTINGS.protectAudible,
     protectedDomains: domains,

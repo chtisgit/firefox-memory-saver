@@ -15,12 +15,13 @@ input[type="number"], textarea { margin-top: 6px; border: 1px solid color-mix(in
 input[type="number"] { width: 88px; padding: 7px; }
 textarea { display: block; width: 100%; padding: 9px; resize: vertical; }
 .grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 24px; }
+.input-range { font-weight: 400; }
 .input-row { display: flex; align-items: center; gap: 8px; font-weight: 400; }
 .hint, .warning { font-size: 13px; }
 .warning { max-width: 620px; padding: 10px 12px; border-radius: 7px; background: color-mix(in srgb, #d99000 12%, Canvas); color: CanvasText; }
 button { min-height: 38px; padding: 0 15px; border: 1px solid color-mix(in srgb, CanvasText 25%, transparent); border-radius: 7px; background: ButtonFace; color: ButtonText; cursor: pointer; font-weight: 600; }
 button.primary { background: AccentColor; border-color: AccentColor; color: AccentColorText; }
 button:focus-visible, input:focus-visible, textarea:focus-visible { outline: 2px solid AccentColor; outline-offset: 2px; }
-.footer { position: sticky; bottom: 0; display: flex; align-items: center; justify-content: flex-end; gap: 18px; padding: 14px 0; background: Canvas; }
+.footer { position: sticky; bottom: 0; display: flex; flex-wrap: wrap; align-items: center; justify-content: flex-end; gap: 18px; padding: 14px 0; background: Canvas; }
 #status.error { color: #c33; }
 @media (max-width: 560px) { .grid { grid-template-columns: 1fr; } }

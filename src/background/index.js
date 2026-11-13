@@ -1,4 +1,4 @@
-import { loadState, normalizeSettings, saveState } from "../core/settings.js";
+import { calculateScanInterval, loadState, normalizeSettings, saveState } from "../core/settings.js";
 import { hostnameMatches, protectedHostname, protectionReasons, selectEligibleByWindow } from "../core/eligibility.js";
 import {
   checkpointUsage,
@@ -212,11 +212,19 @@ async function reconcileRecords() {
 
 async function discardTabs(tabs, reason) {
   const discarded = [];
+  let refusedCount = 0;
+  let failedCount = 0;
   for (const tab of tabs) {
+    let wasDiscarded = false;
     try {
       await browser.tabs.discard(tab.id);
       const confirmed = await browser.tabs.get(tab.id);
-      if (!confirmed.discarded) continue;
+      if (!confirmed.discarded) {
+        refusedCount += 1;
+        continue;
+      }
+      wasDiscarded = true;
+      discarded.push(tab.id);
       const discardedAt = Date.now();
       await saveLastSleep(tab.id, { discardedAt, reason });
       let tabKey;
@@ -234,21 +242,23 @@ async function discardTabs(tabs, reason) {
       };
       state.lifetimeDiscardCount += 1;
       endUsageForTab(state, tab.id, Date.now(), "discarded");
-      discarded.push(tab.id);
     } catch (error) {
+      if (!wasDiscarded) failedCount += 1;
       console.warn(`Could not discard tab ${tab.id}`, error);
     }
   }
   await persist();
-  return discarded;
+  return { discardedTabIds: discarded, refusedCount, failedCount };
 }
 
 async function runScan({ ignoreInactivity = false, windowId, reason = "automatic" } = {}) {
-  if (scanRunning || (!state.settings.enabled && !ignoreInactivity)) return [];
+  if (scanRunning || (!state.settings.enabled && !ignoreInactivity)) {
+    return { discardedTabIds: [], refusedCount: 0, failedCount: 0 };
+  }
   scanRunning = true;
   try {
-    const tabs = await tabsWithProtection(await browser.tabs.query(windowId == null ? {} : { windowId }));
-    const selected = selectEligibleByWindow(tabs, state.settings, Date.now(), { ignoreInactivity });
+    const tabs = await tabsWithProtection(await browser.tabs.query({}));
+    const selected = selectEligibleByWindow(tabs, state.settings, Date.now(), { ignoreInactivity, windowId });
     return await discardTabs(selected, reason);
   } finally {
     scanRunning = false;
@@ -286,6 +296,7 @@ async function popupState(targetTabId) {
     settings: state.settings,
     discardedTabs,
     protectedTabs,
+    eligibleDiscardCount: selectEligibleByWindow(tabs, state.settings, now, { ignoreInactivity: true }).length,
     currentTab: currentTabDetails,
     lifetimeDiscardCount: state.lifetimeDiscardCount,
   };
@@ -297,8 +308,6 @@ async function handleMessage(message) {
       return { ok: true, data: await popupState(message.targetTabId) };
     case "DISCARD_ELIGIBLE_NOW":
       return { ok: true, data: await runScan({ ignoreInactivity: true, windowId: message.windowId, reason: "manual-eligible" }) };
-    case "DISCARD_OTHER_TABS":
-      return { ok: true, data: await runScan({ ignoreInactivity: true, windowId: message.windowId, reason: "manual-others" }) };
     case "TOGGLE_TAB_PROTECTION":
       await toggleTabProtection(await browser.tabs.get(message.tabId));
       return { ok: true };
@@ -314,6 +323,7 @@ async function handleMessage(message) {
     case "SAVE_SETTINGS": {
       const wasTracking = state.settings.usageTrackingEnabled;
       state.settings = normalizeSettings(message.settings);
+      state.settings.scanIntervalMinutes = calculateScanInterval(state.settings.inactivityMinutes);
       if (wasTracking && !state.settings.usageTrackingEnabled) clearUsage(state);
       pruneUsage(state);
       await persist();

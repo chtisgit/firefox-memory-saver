@@ -15,16 +15,22 @@ ordinary text Git objects.
 - Configurable automatic discarding based on Firefox's `lastAccessed` timestamp.
 - Protection for active, pinned, audible, internal, and allowlisted-domain tabs.
 - A tab context-menu submenu for protecting one tab or its entire domain.
-- A minimum number of loaded tabs retained independently in each window.
+- Minimum numbers of loaded tabs retained in each window and across all windows.
 - Popup views listing sleeping and protected tabs, with live counts for both.
-- A separate resizable window with last-sleep and optional active-time details
-  when its content area is taller than 600 pixels.
+- Current-tab last-sleep and optional active-time details.
 - Popup actions for discarding eligible tabs and restoring discarded tabs.
 - Reconciliation with tabs discarded by Firefox or other extensions.
 - Optional foreground active-tab session tracking, disabled by default.
 
 Memory quantities are intentionally not shown. Firefox does not expose exact
 per-tab memory usage to ordinary WebExtensions, and estimates are future work.
+The scan interval is calculated when settings are saved: the discard timeout
+divided by 20, rounded up to a whole minute and capped at 60 minutes.
+The loaded-tab minimums count only inactive, unprotected loaded tabs. Active
+and protected tabs are kept in addition to these minimums. The limits apply to
+discards initiated by Memory Saver; Firefox,
+other extensions, or closing tabs can reduce the number of loaded tabs below
+those limits. The total minimum defaults to 0, adding no restriction unless set.
 
 ## Load in Firefox
 
@@ -65,7 +71,7 @@ already asleep, its actual sleep time is unknown.
 
 Detailed foreground activity tracking is optional and off by default. If enabled,
 the extension stores URLs, titles, timestamps, and foreground durations locally
-for 7 days by default (configurable from 1 to 30 days, with a 10,000-session cap).
+for 7 days by default (configurable from 1 to 365 days, with a 10,000-session cap).
 This is active-tab time, not proof of attention or interaction. Disabling the
 feature or choosing **Clear usage data** deletes its activity history.
 

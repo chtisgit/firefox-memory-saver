@@ -13,15 +13,15 @@ const elements = {
   list: document.querySelector("#tab-list"),
   notice: document.querySelector("#notice"),
   discardWindow: document.querySelector("#discard-window"),
-  discardOthers: document.querySelector("#discard-others"),
   currentTabIcon: document.querySelector("#current-tab-icon"),
   currentTabPageTitle: document.querySelector("#current-tab-page-title"),
   currentTabUrl: document.querySelector("#current-tab-url"),
   currentTabSleep: document.querySelector("#current-tab-sleep"),
   currentTabUsage: document.querySelector("#current-tab-usage"),
+  currentTabDetailsSeparator: document.querySelector("#current-tab-details-separator"),
   protectTab: document.querySelector("#protect-tab"),
   protectionStatus: document.querySelector("#tab-protection-status"),
-  openWindow: document.querySelector("#open-window"),
+  protectionStatusText: document.querySelector("#tab-protection-status-text"),
   settings: document.querySelector("#settings"),
 };
 
@@ -251,25 +251,28 @@ function render() {
   elements.sleepingViewCount.textContent = String(popupState.discardedTabs.length);
   elements.protectedViewCount.textContent = String(popupState.protectedTabs.length);
   elements.lifetime.textContent = `${popupState.lifetimeDiscardCount} discarded by Memory Saver over time`;
+  const eligibleCount = popupState.eligibleDiscardCount;
+  elements.discardWindow.hidden = !eligibleCount;
+  elements.discardWindow.textContent = `Discard ${eligibleCount} now`;
+  elements.discardWindow.setAttribute("aria-label", `Discard ${eligibleCount} eligible tab${eligibleCount === 1 ? "" : "s"} now`);
   const currentTab = popupState.currentTab;
-  elements.openWindow.disabled = !currentTab;
-  elements.discardOthers.disabled = !currentTab;
   const reasons = currentTab?.protectionReasons ?? [];
   elements.currentTabPageTitle.textContent = currentTab?.title || "Untitled tab";
   elements.currentTabPageTitle.title = currentTab?.title || "";
   elements.currentTabUrl.textContent = currentTab?.url || "URL unavailable";
   elements.currentTabUrl.title = currentTab?.url || "";
   const sleep = currentTab?.lastSleep;
-  const sleepTime = Number.isFinite(sleep?.discardedAt) ? formatRelative(sleep.discardedAt) : "Time unknown";
-  elements.currentTabSleep.textContent = !currentTab ? "Last slept: Unknown" : sleep
-    ? `Last slept: ${sleepTime} · Cause: ${reasonLabel(sleep.reason)}`
-    : "Last slept: No recorded sleep";
+  const sleepTime = Number.isFinite(sleep?.discardedAt) ? formatRelative(sleep.discardedAt).toLowerCase() : "time unknown";
+  elements.currentTabSleep.textContent = !currentTab ? "last slept unknown" : sleep
+    ? `last slept ${sleepTime}`
+    : "no recorded sleep";
   elements.currentTabSleep.title = Number.isFinite(sleep?.discardedAt) ? new Date(sleep.discardedAt).toLocaleString() : "";
   elements.currentTabUsage.hidden = !currentTab || !popupState.settings.usageTrackingEnabled;
+  elements.currentTabDetailsSeparator.hidden = elements.currentTabUsage.hidden;
   const days = popupState.settings.usageHistoryDays;
   elements.currentTabUsage.textContent = currentTab?.usage
-    ? `Active time: ${formatDuration(currentTab.usage.totalActiveMs)} in the last ${days} day${days === 1 ? "" : "s"}`
-    : "Active time: Unknown";
+    ? `${formatDuration(currentTab.usage.totalActiveMs).toLowerCase()} active in the last ${days} day${days === 1 ? "" : "s"}`
+    : "active time unknown";
   elements.currentTabIcon.hidden = !currentTab?.favIconUrl;
   if (currentTab?.favIconUrl) elements.currentTabIcon.src = currentTab.favIconUrl;
   else elements.currentTabIcon.removeAttribute("src");
@@ -279,7 +282,7 @@ function render() {
     ? "Allow discarding this Tab"
     : "Protect this Tab";
   elements.protectionStatus.hidden = !reasons.length;
-  elements.protectionStatus.textContent = reasons.length
+  elements.protectionStatusText.textContent = reasons.length
     ? `This tab is currently protected. ${reasons.map(protectionLabel).join(" · ")}.${reasons.some((reason) => reason.type === "tab") ? " Manual protection only applies to this tab and is preserved until the tab is closed." : ""}`
     : "";
   renderSelectedList();
@@ -297,26 +300,25 @@ async function refresh() {
   render();
 }
 
-async function runDiscard(type) {
-  if (type === "DISCARD_OTHER_TABS" && !Number.isInteger(popupState?.currentTab?.windowId)) {
-    showNotice("The original tab is no longer available.", true);
-    return;
-  }
+async function runDiscard() {
   elements.discardWindow.disabled = true;
-  elements.discardOthers.disabled = true;
   showNotice("Checking tabs…");
   try {
-    const ids = await request({
-      type,
-      windowId: type === "DISCARD_OTHER_TABS" ? popupState?.currentTab?.windowId : undefined,
-    });
-    showNotice(ids.length ? `Discarded ${ids.length} tab${ids.length === 1 ? "" : "s"}.` : "No eligible tabs found.");
+    const { discardedTabIds, refusedCount, failedCount } = await request({ type: "DISCARD_ELIGIBLE_NOW" });
+    const messages = [];
+    if (discardedTabIds.length) {
+      messages.push(`Discarded ${discardedTabIds.length} tab${discardedTabIds.length === 1 ? "" : "s"}.`);
+    } else if (!refusedCount) {
+      messages.push(failedCount ? "No tabs discarded." : "No eligible tabs found.");
+    }
+    if (refusedCount) messages.push(`Firefox refused to discard ${refusedCount} tab${refusedCount === 1 ? "" : "s"}.`);
+    if (failedCount) messages.push(`Could not discard ${failedCount} tab${failedCount === 1 ? "" : "s"} due to an error.`);
+    showNotice(messages.join(" "));
     await refresh();
   } catch (error) {
     showNotice(error.message, true);
   } finally {
     elements.discardWindow.disabled = false;
-    elements.discardOthers.disabled = !popupState?.currentTab;
   }
 }
 
@@ -328,30 +330,6 @@ elements.enabled.addEventListener("change", async () => {
   } catch (error) { showNotice(error.message, true); }
 });
 elements.currentTabIcon.addEventListener("error", () => { elements.currentTabIcon.hidden = true; });
-elements.openWindow.addEventListener("click", async () => {
-  const tabId = popupState?.currentTab?.id;
-  if (!Number.isInteger(tabId)) return;
-  elements.openWindow.disabled = true;
-  try {
-    const url = new URL(browser.runtime.getURL("src/popup/index.html"));
-    url.searchParams.set("window", "1");
-    url.searchParams.set("tab", String(tabId));
-    const width = Math.min(500, screen.availWidth);
-    const height = Math.min(800, screen.availHeight);
-    await browser.windows.create({
-      url: url.href,
-      type: "popup",
-      width,
-      height,
-      left: screen.availLeft + Math.max(0, screen.availWidth - width - 24),
-      top: screen.availTop + Math.floor((screen.availHeight - height) / 2),
-    });
-    window.close();
-  } catch (error) {
-    showNotice(error.message, true);
-    elements.openWindow.disabled = false;
-  }
-});
 elements.protectTab.addEventListener("click", async () => {
   const tabId = popupState?.currentTab?.id;
   if (!Number.isInteger(tabId)) return;
@@ -365,8 +343,7 @@ elements.protectTab.addEventListener("click", async () => {
     elements.protectTab.disabled = !popupState?.currentTab;
   }
 });
-elements.discardWindow.addEventListener("click", () => runDiscard("DISCARD_ELIGIBLE_NOW"));
-elements.discardOthers.addEventListener("click", () => runDiscard("DISCARD_OTHER_TABS"));
+elements.discardWindow.addEventListener("click", runDiscard);
 elements.settings.addEventListener("click", () => browser.runtime.openOptionsPage());
 
 function selectView(view) {

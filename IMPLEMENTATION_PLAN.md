@@ -33,7 +33,7 @@ otherwise ineligible tab.
 - Restore/focus action for each discarded tab.
 - Domain protection list.
 - A tab context-menu submenu for per-tab and per-domain protection.
-- Configurable inactivity threshold, scan interval, and minimum loaded-tab count.
+- Configurable inactivity threshold and minimum loaded-tab counts, with a derived scan interval.
 - Protection for active, pinned, audible, and special Firefox pages.
 - Persistent settings and discard history for the current open tabs.
 - Local, bounded foreground active-tab session history.
@@ -135,6 +135,7 @@ interface Settings {
   inactivityMinutes: number;
   scanIntervalMinutes: number;
   minimumLoadedTabsPerWindow: number;
+  minimumLoadedTabsTotal: number;
   protectPinned: boolean;
   protectAudible: boolean;
   protectedDomains: string[];
@@ -232,9 +233,10 @@ focus behind the user's back to support a "Discard this tab" action.
 1. On installation/startup, load and validate settings.
 2. Create or refresh a named periodic alarm.
 3. When the alarm fires, query all tabs.
-4. Group tabs by window and calculate the loaded-tab budget for each window.
+4. Calculate the loaded-tab budgets for each window and for all windows,
+   counting only inactive, unprotected loaded tabs, regardless of their age.
 5. Sort eligible tabs by `lastAccessed`, oldest first.
-6. Select only as many tabs as the minimum-loaded-tabs rule permits.
+6. Select only as many tabs as both minimum-loaded-tabs rules permit.
 7. Call `browser.tabs.discard(tabId)` one tab at a time so failures are isolated.
 8. Re-query the tab to confirm that Firefox marked it as discarded.
 9. Create a `DiscardRecord` only after confirmation.
@@ -309,7 +311,7 @@ derived from timestamps using a single captured
 
 Usage tracking is opt-in and disabled by default. Its data remains in
 `browser.storage.local`; it is never transmitted. The default retention after
-opt-in is 7 days, configurable from 1 to 30 days. Settings provide a one-click
+opt-in is 7 days, configurable from 1 to 365 days. Settings provide a one-click
 "Clear usage data" action. Disabling tracking closes the current session and
 deletes all usage history. The privacy notice must explain that URLs, titles,
 timestamps, and foreground durations are stored locally.
@@ -377,13 +379,14 @@ Settings:
 
 - Enable automatic discarding.
 - Discard after: 5 minutes to 24 hours (default: 10 minutes).
-- Check every: 1 to 60 minutes (default: 3 minutes).
-- Keep at least: 1 to 20 loaded tabs per window.
+- Scan interval: the inactivity threshold divided by 20, rounded up and capped at 60 minutes (default: 1 minute).
+- Keep at least: 0 to 20 loaded tabs per window.
+- Keep at least: 0 to 100 loaded tabs in total (default: 0, no additional limit).
 - Protect pinned tabs.
 - Protect audible tabs.
 - Protected domains, one hostname per entry.
 - Record detailed foreground tab activity (off by default).
-- Usage-history retention: 1 to 30 days (default: 7).
+- Usage-history retention: 1 to 365 days (default: 7).
 - Clear locally stored usage data.
 - Reset settings.
 
@@ -391,7 +394,7 @@ Domain entries are normalized to lowercase hostnames. Invalid entries produce an
 inline validation message and are not saved. Subdomain behavior will be explicit:
 protecting `example.com` also protects `*.example.com`.
 
-Saving a changed scan interval must recreate the alarm immediately.
+Saving settings recalculates the scan interval from the inactivity threshold and recreates the alarm immediately.
 
 ## 13. Background/UI message protocol
 
@@ -402,7 +405,6 @@ runtime messages:
 type Request =
   | { type: "GET_POPUP_STATE" }
   | { type: "DISCARD_ELIGIBLE_NOW"; windowId?: number }
-  | { type: "DISCARD_OTHER_TABS"; windowId: number; activeTabId: number }
   | { type: "RESTORE_TAB"; tabId: number; windowId: number }
   | { type: "CLOSE_TAB"; tabId: number }
   | { type: "GET_SETTINGS" }
@@ -539,7 +541,8 @@ functions will not import browser globals directly.
    threshold, allowing for one scan interval of delay.
 2. Active, pinned, audible, protected-domain, internal, and already-discarded
    tabs are not automatically discarded.
-3. The minimum loaded-tab count is respected independently in every window.
+3. The per-window and total minimum loaded-tab counts are respected when the
+   extension selects tabs to discard.
 4. Firefox API refusals do not create records or stop the rest of a scan.
 5. The popup lists all currently discarded tabs and removes rows after tabs are
    restored or closed.

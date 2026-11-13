@@ -1,5 +1,5 @@
-import { inspectEligibility, protectedHostname, protectionReasons, selectEligibleTabs } from "../src/core/eligibility.js";
-import { DEFAULT_SETTINGS, normalizeDomain, normalizeSettings } from "../src/core/settings.js";
+import { inspectEligibility, protectedHostname, protectionReasons, selectEligibleByWindow, selectEligibleTabs } from "../src/core/eligibility.js";
+import { calculateScanInterval, DEFAULT_SETTINGS, normalizeDomain, normalizeSettings } from "../src/core/settings.js";
 import { endLiveRecord, getTabKey, pruneUsage, recoverInterruptedUsage, releaseTabKey, usageSummaryForTab } from "../src/core/usage.js";
 
 const tests = [];
@@ -34,11 +34,26 @@ test("repairs invalid settings conservatively", () => {
   equal(value.inactivityMinutes, 5);
   equal(value.scanIntervalMinutes, 60);
   equal(value.protectedDomains, ["example.com"]);
+  equal(normalizeSettings({ minimumLoadedTabsTotal: -1 }).minimumLoadedTabsTotal, 0);
+  equal(normalizeSettings({ minimumLoadedTabsTotal: 2000 }).minimumLoadedTabsTotal, 100);
+  equal(normalizeSettings({ minimumLoadedTabsTotal: 100 }).minimumLoadedTabsTotal, 100);
+  equal(normalizeSettings({ usageHistoryDays: 365 }).usageHistoryDays, 365);
+  equal(normalizeSettings({ usageHistoryDays: 366 }).usageHistoryDays, 365);
+  equal(normalizeSettings({ minimumLoadedTabsTotal: 10 }).minimumLoadedTabsTotal, 10);
 });
 
 test("uses the MVP automatic-discard defaults", () => {
   equal(DEFAULT_SETTINGS.inactivityMinutes, 10);
-  equal(DEFAULT_SETTINGS.scanIntervalMinutes, 3);
+  equal(DEFAULT_SETTINGS.scanIntervalMinutes, 1);
+  equal(normalizeSettings({}).minimumLoadedTabsTotal, 0);
+});
+
+test("derives the scan interval by rounding up and capping it at 60 minutes", () => {
+  equal(calculateScanInterval(5), 1);
+  equal(calculateScanInterval(20), 1);
+  equal(calculateScanInterval(21), 2);
+  equal(calculateScanInterval(1200), 60);
+  equal(calculateScanInterval(1440), 60);
 });
 
 test("protects active, pinned, audible, internal, and protected-domain tabs", () => {
@@ -78,7 +93,7 @@ test("applies inactivity threshold", () => {
   equal(inspectEligibility(tab({ lastAccessed: now - 60 * 60_000 }), settings, now).eligible, true);
 });
 
-test("keeps the minimum loaded tab budget and chooses oldest first", () => {
+test("keeps inactive tabs in addition to the active tab and chooses oldest first", () => {
   const settings = { ...DEFAULT_SETTINGS, minimumLoadedTabsPerWindow: 2 };
   const selected = selectEligibleTabs([
     tab({ id: 1, lastAccessed: 300 }),
@@ -86,7 +101,98 @@ test("keeps the minimum loaded tab budget and chooses oldest first", () => {
     tab({ id: 3, lastAccessed: 200 }),
     tab({ id: 4, active: true, lastAccessed: 400 }),
   ], settings, 10_000_000, { ignoreInactivity: true });
-  equal(selected.map((item) => item.id), [2, 3]);
+  equal(selected.map((item) => item.id), [2]);
+});
+
+test("respects global and per-window minimums of inactive unprotected tabs", () => {
+  const settings = { ...DEFAULT_SETTINGS, minimumLoadedTabsPerWindow: 2, minimumLoadedTabsTotal: 5 };
+  const tabs = [
+    tab({ id: 1, windowId: 1, lastAccessed: 10 }),
+    tab({ id: 2, windowId: 1, lastAccessed: 20 }),
+    tab({ id: 3, windowId: 1, active: true, lastAccessed: 50 }),
+    tab({ id: 4, windowId: 2, lastAccessed: 5 }),
+    tab({ id: 5, windowId: 2, lastAccessed: 30 }),
+    tab({ id: 6, windowId: 2, active: true, lastAccessed: 60 }),
+    tab({ id: 7, windowId: 2, discarded: true, lastAccessed: 1 }),
+    tab({ id: 8, windowId: 1, lastAccessed: 40 }),
+    tab({ id: 9, windowId: 2, lastAccessed: 45 }),
+  ];
+  const options = { ignoreInactivity: true };
+  equal(selectEligibleByWindow(tabs, settings, 100, options).map((item) => item.id), [4]);
+  equal(selectEligibleByWindow(tabs, { ...settings, minimumLoadedTabsTotal: 4 }, 100, options).map((item) => item.id), [4, 1]);
+  equal(selectEligibleByWindow(tabs, { ...settings, minimumLoadedTabsTotal: 0 }, 100, options).map((item) => item.id), [4, 1]);
+  equal(selectEligibleByWindow(tabs, { ...settings, minimumLoadedTabsTotal: 6 }, 100, options), []);
+});
+
+test("scoped discards count inactive unprotected tabs in other windows", () => {
+  const settings = { ...DEFAULT_SETTINGS, minimumLoadedTabsPerWindow: 1, minimumLoadedTabsTotal: 3 };
+  const tabs = [
+    tab({ id: 1, windowId: 1, lastAccessed: 20 }),
+    tab({ id: 2, windowId: 1, lastAccessed: 30 }),
+    tab({ id: 3, windowId: 1, active: true, lastAccessed: 50 }),
+    tab({ id: 4, windowId: 2, active: true, lastAccessed: 40 }),
+    tab({ id: 5, windowId: 2, discarded: true, lastAccessed: 1 }),
+    tab({ id: 6, windowId: 2, lastAccessed: 10 }),
+    tab({ id: 7, windowId: 2, lastAccessed: 15 }),
+  ];
+  equal(selectEligibleByWindow(tabs, settings, 100, { ignoreInactivity: true, windowId: 1 }).map((item) => item.id), [1]);
+  equal(selectEligibleByWindow(tabs, settings, 100, { ignoreInactivity: true, windowId: 2 }).map((item) => item.id), [6]);
+});
+
+test("zero per-window minimum retains active tabs and respects the total minimum", () => {
+  const tabs = [
+    tab({ id: 1, windowId: 1, active: true, lastAccessed: 10 }),
+    tab({ id: 2, windowId: 1, lastAccessed: 20 }),
+    tab({ id: 3, windowId: 2, active: true, lastAccessed: 30 }),
+    tab({ id: 4, windowId: 2, lastAccessed: 40 }),
+  ];
+  const settings = normalizeSettings({ minimumLoadedTabsPerWindow: 0, minimumLoadedTabsTotal: 1 });
+  equal(settings.minimumLoadedTabsPerWindow, 0);
+  equal(selectEligibleByWindow(tabs, settings, 100, { ignoreInactivity: true }).map((item) => item.id), [2]);
+  equal(selectEligibleByWindow(tabs, { ...settings, minimumLoadedTabsTotal: 0 }, 100, { ignoreInactivity: true }).map((item) => item.id), [2, 4]);
+});
+
+test("every protection type is excluded from both minimum counts", () => {
+  const settings = { ...DEFAULT_SETTINGS, minimumLoadedTabsPerWindow: 1, minimumLoadedTabsTotal: 1, protectedDomains: ["protected.example"] };
+  const tabs = [
+    tab({ id: 1, active: true }),
+    tab({ id: 2, pinned: true }),
+    tab({ id: 3, audible: true }),
+    tab({ id: 4, memorySaverProtected: true }),
+    tab({ id: 5, url: "https://protected.example" }),
+    tab({ id: 6, url: "about:config" }),
+    tab({ id: 7, discarded: true }),
+    tab({ id: 8, lastAccessed: 10 }),
+  ];
+  equal(selectEligibleByWindow(tabs, settings, 100, { ignoreInactivity: true }), []);
+  tabs.push(tab({ id: 9, lastAccessed: 20 }));
+  equal(selectEligibleByWindow(tabs, settings, 100, { ignoreInactivity: true }).map((item) => item.id), [8]);
+});
+
+test("recent inactive tabs count toward the minimum during automatic scans", () => {
+  const now = 10_000_000;
+  const settings = { ...DEFAULT_SETTINGS, inactivityMinutes: 5, minimumLoadedTabsPerWindow: 2 };
+  const tabs = [
+    tab({ id: 1, active: true, lastAccessed: now }),
+    tab({ id: 2, lastAccessed: now - 1_000 }),
+    tab({ id: 3, lastAccessed: now - 400_000 }),
+    tab({ id: 4, lastAccessed: now - 500_000 }),
+  ];
+  equal(selectEligibleByWindow(tabs, settings, now).map((item) => item.id), [4]);
+});
+
+test("switching tabs does not let protected tabs satisfy the inactive minimum", () => {
+  const settings = { ...DEFAULT_SETTINGS, minimumLoadedTabsPerWindow: 2 };
+  const tabs = [
+    tab({ id: 1, active: true }),
+    tab({ id: 2, discarded: true }),
+    tab({ id: 3, memorySaverProtected: true }),
+  ];
+  equal(selectEligibleByWindow(tabs, settings, 100, { ignoreInactivity: true }), []);
+  tabs[0].active = false;
+  tabs[1].active = true;
+  tabs[1].discarded = false;
+  equal(selectEligibleByWindow(tabs, settings, 100, { ignoreInactivity: true }), []);
 });
 
 test("ends usage sessions with non-negative durations", () => {
@@ -167,12 +273,23 @@ test("duplicate tab identities are separated while restored identities are retai
 test("background module loads against the Firefox API contract", async () => {
   const event = { addListener() {} };
   let onMessage;
+  let queriedTabs = [];
+  const refusedIds = new Set();
+  const failedIds = new Set();
+  const alarms = [];
   globalThis.browser = {
     storage: { local: { async get() { return {}; }, async set() {} } },
-    alarms: { async clear() {}, create() {}, onAlarm: event },
+    alarms: { async clear() {}, create(name, options) { alarms.push({ name, ...options }); }, onAlarm: event },
     runtime: { onMessage: { addListener(listener) { onMessage = listener; } }, onInstalled: event },
     tabs: {
-      async query() { return []; },
+      async query(query = {}) {
+        return queriedTabs.filter((item) => query.active == null || item.active === query.active);
+      },
+      async get(id) { return queriedTabs.find((item) => item.id === id); },
+      async discard(id) {
+        if (failedIds.has(id)) throw new Error("Simulated API error");
+        if (!refusedIds.has(id)) queriedTabs.find((item) => item.id === id).discarded = true;
+      },
       async update() {},
       async remove() {},
       onActivated: event,
@@ -207,6 +324,37 @@ test("background module loads against the Firefox API contract", async () => {
   try {
     await import("../src/background/index.js");
     equal((await onMessage({ type: "GET_SETTINGS" })).ok, true);
+    const saved = await onMessage({ type: "SAVE_SETTINGS", settings: { ...DEFAULT_SETTINGS, inactivityMinutes: 21 } });
+    equal(saved.data.scanIntervalMinutes, 2);
+    equal(alarms.filter((alarm) => alarm.name === "memory-saver-scan").at(-1).periodInMinutes, 2);
+    queriedTabs = [
+      tab({ id: 1, active: true, lastAccessed: Date.now() }),
+      tab({ id: 2, lastAccessed: Date.now() }),
+      tab({ id: 3, lastAccessed: Date.now() }),
+      tab({ id: 4, pinned: true }),
+      tab({ id: 5, discarded: true }),
+      tab({ id: 6, lastAccessed: Date.now() }),
+      tab({ id: 7, lastAccessed: Date.now() }),
+    ];
+    equal((await onMessage({ type: "GET_POPUP_STATE" })).data.eligibleDiscardCount, 2);
+    equal((await onMessage({ type: "DISCARD_ELIGIBLE_NOW" })).data, { discardedTabIds: [2, 3], refusedCount: 0, failedCount: 0 });
+    equal((await onMessage({ type: "GET_POPUP_STATE" })).data.eligibleDiscardCount, 0);
+    for (const item of queriedTabs.filter((item) => [2, 3].includes(item.id))) item.discarded = false;
+    refusedIds.add(2);
+    equal((await onMessage({ type: "DISCARD_ELIGIBLE_NOW" })).data, { discardedTabIds: [3], refusedCount: 1, failedCount: 0 });
+    queriedTabs.find((item) => item.id === 3).discarded = false;
+    refusedIds.add(3);
+    equal((await onMessage({ type: "DISCARD_ELIGIBLE_NOW" })).data, { discardedTabIds: [], refusedCount: 2, failedCount: 0 });
+    refusedIds.clear();
+    failedIds.add(2);
+    failedIds.add(3);
+    const originalWarn = console.warn;
+    try {
+      console.warn = () => {};
+      equal((await onMessage({ type: "DISCARD_ELIGIBLE_NOW" })).data, { discardedTabIds: [], refusedCount: 0, failedCount: 2 });
+    } finally {
+      console.warn = originalWarn;
+    }
     equal(errors.length, 0);
   } finally {
     console.error = originalError;

@@ -19,16 +19,19 @@
           <h2>Automatic discarding</h2>
           <label class="check"><input id="enabled" type="checkbox"> Enable automatic tab discarding</label>
           <div class="grid">
-            <label>Discard tabs after
+            <label>Discard tabs after <span class="input-range">(5–1,440 minutes)</span>
               <span class="input-row"><input id="inactivity" type="number" min="5" max="1440" required> minutes</span>
             </label>
-            <label>Check every
-              <span class="input-row"><input id="scan-interval" type="number" min="1" max="60" required> minutes</span>
+          </div>
+          <div class="grid">
+            <label>Keep at least <span class="input-range">(0–20 tabs)</span>
+              <span class="input-row"><input id="minimum-loaded" type="number" min="0" max="20" required> loaded tabs per window</span>
             </label>
-            <label>Keep at least
-              <span class="input-row"><input id="minimum-loaded" type="number" min="1" max="20" required> loaded tabs per window</span>
+            <label>Keep at least <span class="input-range">(0–100 tabs)</span>
+              <span class="input-row"><input id="minimum-loaded-total" type="number" min="0" max="100" required> loaded tabs in total</span>
             </label>
           </div>
+          <p class="hint">Both limits count only inactive, unprotected loaded tabs and apply to automatic and manual discarding. Active and protected tabs are kept in addition. Set either limit to 0 to disable it.</p>
         </section>
 
         <section>
@@ -44,14 +47,15 @@
           <h2>Foreground activity history</h2>
           <label class="check"><input id="usage-enabled" type="checkbox"> Record detailed foreground active-tab time</label>
           <p class="warning">Optional and off by default. When enabled, URLs, titles, timestamps, and durations are stored only on this device. This measures selection in the focused Firefox window—not attention.</p>
-          <label>Keep history for
-            <span class="input-row"><input id="usage-days" type="number" min="1" max="30" required> days</span>
+          <label>Keep history for <span class="input-range">(1–365 days)</span>
+            <span class="input-row"><input id="usage-days" type="number" min="1" max="365" required> days</span>
           </label>
           <button id="clear-usage" type="button" class="secondary">Clear usage data</button>
         </section>
 
         <div class="footer">
           <p id="status" role="status" aria-live="polite"></p>
+          <button id="restore-defaults" type="button" class="secondary">Restore Default Settings</button>
           <button type="submit" class="primary">Save settings</button>
         </div>
       </form>

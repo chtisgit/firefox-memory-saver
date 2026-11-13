@@ -1,11 +1,11 @@
-import { normalizeDomain } from "../core/settings.js";
+import { DEFAULT_SETTINGS, normalizeDomain } from "../core/settings.js";
 
 const form = document.querySelector("#settings-form");
 const fields = {
   enabled: document.querySelector("#enabled"),
   inactivityMinutes: document.querySelector("#inactivity"),
-  scanIntervalMinutes: document.querySelector("#scan-interval"),
   minimumLoadedTabsPerWindow: document.querySelector("#minimum-loaded"),
+  minimumLoadedTabsTotal: document.querySelector("#minimum-loaded-total"),
   protectPinned: document.querySelector("#protect-pinned"),
   protectAudible: document.querySelector("#protect-audible"),
   protectedDomains: document.querySelector("#domains"),
@@ -28,8 +28,8 @@ function showStatus(message, error = false) {
 function populate(settings) {
   fields.enabled.checked = settings.enabled;
   fields.inactivityMinutes.value = settings.inactivityMinutes;
-  fields.scanIntervalMinutes.value = settings.scanIntervalMinutes;
   fields.minimumLoadedTabsPerWindow.value = settings.minimumLoadedTabsPerWindow;
+  fields.minimumLoadedTabsTotal.value = settings.minimumLoadedTabsTotal;
   fields.protectPinned.checked = settings.protectPinned;
   fields.protectAudible.checked = settings.protectAudible;
   fields.protectedDomains.value = settings.protectedDomains.join("\n");
@@ -46,8 +46,8 @@ function readSettings() {
     schemaVersion: 1,
     enabled: fields.enabled.checked,
     inactivityMinutes: Number(fields.inactivityMinutes.value),
-    scanIntervalMinutes: Number(fields.scanIntervalMinutes.value),
     minimumLoadedTabsPerWindow: Number(fields.minimumLoadedTabsPerWindow.value),
+    minimumLoadedTabsTotal: Number(fields.minimumLoadedTabsTotal.value),
     protectPinned: fields.protectPinned.checked,
     protectAudible: fields.protectAudible.checked,
     protectedDomains: rawDomains,
@@ -66,11 +66,17 @@ form.addEventListener("submit", async (event) => {
   } catch (error) { showStatus(error.message, true); }
 });
 
+document.querySelector("#restore-defaults").addEventListener("click", () => {
+  populate(DEFAULT_SETTINGS);
+  showStatus("Default values loaded. Select Save settings to apply them.");
+});
+
 fields.usageTrackingEnabled.addEventListener("change", () => {
   fields.usageHistoryDays.disabled = !fields.usageTrackingEnabled.checked;
 });
 
 document.querySelector("#clear-usage").addEventListener("click", async () => {
+  if (!window.confirm("Clear all recorded foreground activity history? This cannot be undone.")) return;
   try {
     await request({ type: "CLEAR_USAGE_DATA" });
     showStatus("Usage data cleared.");

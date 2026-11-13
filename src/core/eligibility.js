@@ -68,19 +68,29 @@ export function inspectEligibility(tab, settings, now = Date.now(), options = {}
 }
 
 export function selectEligibleTabs(tabs, settings, now = Date.now(), options = {}) {
-  const loadedTabs = tabs.filter((tab) => !tab.discarded);
-  const budget = Math.max(0, loadedTabs.length - settings.minimumLoadedTabsPerWindow);
-  return tabs
-    .filter((tab) => inspectEligibility(tab, settings, now, options).eligible)
-    .sort((a, b) => (a.lastAccessed ?? Number.MAX_SAFE_INTEGER) - (b.lastAccessed ?? Number.MAX_SAFE_INTEGER))
-    .slice(0, budget);
+  return selectEligibleByWindow(tabs, settings, now, options);
 }
 
 export function selectEligibleByWindow(tabs, settings, now = Date.now(), options = {}) {
-  const grouped = new Map();
-  for (const tab of tabs) {
-    if (!grouped.has(tab.windowId)) grouped.set(tab.windowId, []);
-    grouped.get(tab.windowId).push(tab);
+  const loadedCounts = new Map();
+  // Count inactive, unprotected tabs even when they have not reached the timeout.
+  const loadedTabs = tabs.filter((tab) => inspectEligibility(tab, settings, now, { ignoreInactivity: true }).eligible);
+  for (const tab of loadedTabs) {
+    loadedCounts.set(tab.windowId, (loadedCounts.get(tab.windowId) ?? 0) + 1);
   }
-  return [...grouped.values()].flatMap((windowTabs) => selectEligibleTabs(windowTabs, settings, now, options));
+  let budget = Math.max(0, loadedTabs.length - (settings.minimumLoadedTabsTotal ?? 0));
+  const candidates = tabs
+    .filter((tab) => (options.windowId == null || tab.windowId === options.windowId)
+      && inspectEligibility(tab, settings, now, options).eligible)
+    .sort((a, b) => (a.lastAccessed ?? Number.MAX_SAFE_INTEGER) - (b.lastAccessed ?? Number.MAX_SAFE_INTEGER));
+  const selected = [];
+  for (const tab of candidates) {
+    if (!budget) break;
+    const windowCount = loadedCounts.get(tab.windowId) ?? 0;
+    if (windowCount <= settings.minimumLoadedTabsPerWindow) continue;
+    selected.push(tab);
+    loadedCounts.set(tab.windowId, windowCount - 1);
+    budget -= 1;
+  }
+  return selected;
 }

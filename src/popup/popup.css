@@ -16,11 +16,8 @@ h1 { font-size: 18px; }
 h2 { font-size: 13px; }
 .subtitle, .muted { color: color-mix(in srgb, CanvasText 65%, transparent); }
 main { padding: 14px 18px 18px; }
-.header-controls { display: flex; align-items: center; gap: 9px; }
-.settings-button, .header-button { display: grid; place-items: center; width: 38px; min-height: 38px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: color-mix(in srgb, CanvasText 72%, transparent); transition: color .18s ease, background-color .18s ease, transform .18s ease; }
-.header-button svg { width: 21px; height: 21px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
-.header-button:hover { background: color-mix(in srgb, AccentColor 12%, transparent); color: AccentColor; filter: none; }
-.window-view #open-window { display: none; }
+.header-status, .header-controls { display: flex; align-items: center; gap: 9px; }
+.settings-button { display: grid; place-items: center; width: 38px; min-height: 38px; padding: 0; border: 0; border-radius: 50%; background: transparent; color: color-mix(in srgb, CanvasText 72%, transparent); transition: color .18s ease, background-color .18s ease, transform .18s ease; }
 .settings-button svg { width: 23px; height: 23px; fill: none; stroke: currentColor; stroke-width: 1.65; stroke-linecap: round; stroke-linejoin: round; transition: transform .28s cubic-bezier(.2, .8, .2, 1); }
 .settings-button:hover { background: color-mix(in srgb, AccentColor 12%, transparent); color: AccentColor; filter: none; }
 .settings-button:hover svg { transform: rotate(24deg); }
@@ -29,20 +26,21 @@ main { padding: 14px 18px 18px; }
   .settings-button, .settings-button svg { transition: none; }
   .settings-button:hover svg { transform: none; }
 }
-.overview { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 8px; }
 .summary { display: flex; align-items: center; gap: 8px; min-height: 70px; padding: 14px; background: color-mix(in srgb, AccentColor 10%, Canvas); border-radius: 10px; }
 .summary-copy { min-width: 0; }
 .summary strong { flex: none; font-size: 30px; line-height: 1; color: AccentColor; }
 .summary span { display: block; margin-top: 2px; font-size: 12px; color: color-mix(in srgb, CanvasText 65%, transparent); }
-.actions { display: grid; grid-template-rows: 1fr 1fr; gap: 8px; }
+#discard-window { flex: none; margin-left: auto; padding: 0 10px; white-space: nowrap; }
 button { min-height: 34px; border: 1px solid color-mix(in srgb, CanvasText 22%, transparent); border-radius: 7px; background: ButtonFace; color: ButtonText; cursor: pointer; }
 button:hover { filter: brightness(.96); }
 button:focus-visible, input:focus-visible { outline: 2px solid AccentColor; outline-offset: 2px; }
 button:disabled { opacity: .55; cursor: default; }
 .tab-protection { display: flex; flex-direction: column; gap: 6px; margin: 12px 0; }
 .tab-protection p { font-size: 12px; }
-.current-tab-details { display: none; }
-@media (min-height: 601px) { .window-view .current-tab-details { display: grid; gap: 6px; } }
+#tab-protection-status:not([hidden]) { display: flex; align-items: flex-start; gap: 5px; }
+.protection-icon { flex: none; width: 14px; height: 14px; margin-top: 1px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.current-tab-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 8px; }
+.current-tab-details { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: 0 6px; margin-left: auto; font-size: 12px; }
 .current-tab-address { display: flex; align-items: center; gap: 6px; min-width: 0; font-size: 12px; }
 .current-tab-icon { flex: none; width: 16px; height: 16px; object-fit: contain; }
 #current-tab-page-title, #current-tab-url { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
