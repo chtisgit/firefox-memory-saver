@@ -20,7 +20,7 @@ ordinary text Git objects.
 - Current-tab last-sleep and optional active-time details.
 - Popup actions for discarding eligible tabs and restoring discarded tabs.
 - Reconciliation with tabs discarded by Firefox or other extensions.
-- Optional foreground active-tab session tracking, disabled by default.
+- Optional foreground activity and confirmed tab-discard recording, disabled by default.
 
 Memory quantities are intentionally not shown. Firefox does not expose exact
 per-tab memory usage to ordinary WebExtensions, and estimates are future work.
@@ -46,8 +46,11 @@ than Firefox on desktop. Temporary extensions are removed when Firefox closes.
 
 ## Run the unit tests
 
-Open `tests/index.html` in Firefox. The page runs browser-independent tests for
-settings normalization, eligibility, selection budgets, and usage-session logic.
+Open `tests/index.html` in Firefox, or run `node tests/run.mjs` with Node.js 22
+or newer. Both run the same suite for settings normalization, eligibility,
+selection budgets, activity migration and retention, and recorder event handling.
+The recorder integration tests use mocked Firefox APIs; a real Firefox smoke test
+across an extension reload and browser restart is also required before publishing.
 
 ## Package
 
@@ -69,11 +72,24 @@ The most recent observed sleep time and cause are also stored in the tab's Firef
 session data, independently of optional usage tracking. If a tab is discovered
 already asleep, its actual sleep time is unknown.
 
-Detailed foreground activity tracking is optional and off by default. If enabled,
-the extension stores URLs, titles, timestamps, and foreground durations locally
-for 7 days by default (configurable from 1 to 365 days, with a 10,000-session cap).
-This is active-tab time, not proof of attention or interaction. Disabling the
-feature or choosing **Clear usage data** deletes its activity history.
+Detailed activity tracking is optional and off by default. If enabled, the
+extension records URLs, titles, foreground intervals, confirmed sleep events,
+per-tab observation/access metadata, and recording coverage locally. This prepares
+history for planned review tools that can help explain browsing patterns, which
+tabs sleep and how often, and which tabs to protect. It may also support more
+intelligent automatic discarding in future versions; those views and decisions
+are not implemented yet.
+
+History is kept for 14 days by default (configurable from 1 to 365 days), with
+independent 10,000-record caps for foreground sessions and sleep events. Coverage
+records identify known interruptions and truncation rather than treating missing
+data as zero. Observation metadata for open tabs can retain known last-access
+and activation times beyond the detailed-history cutoff; closed metadata expires
+when its last retained record does. This is active-tab time, not proof of
+attention or interaction. Disabling the feature or confirming **Clear usage data**
+deletes its detailed activity history. No detailed history is collected while
+recording is disabled. See [Activity recording](docs/ACTIVITY_RECORDING.md) for
+the schema, migration, and recovery behavior.
 
 See [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for architecture, milestones,
 and acceptance criteria.

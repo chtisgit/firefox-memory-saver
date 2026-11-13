@@ -13,7 +13,7 @@ command -v zip >/dev/null 2>&1 || {
 rm -f -- "$archive"
 
 cd -- "$project_dir"
-zip -X -r -q "$archive" manifest.json icons src README.md CHANGELOG.txt \
+zip -X -r -q "$archive" manifest.json icons src docs README.md CHANGELOG.txt \
   -x '*/.DS_Store' '*/Thumbs.db'
 
 echo "Built $archive"

@@ -45,8 +45,9 @@
 
         <section>
           <h2>Foreground activity history</h2>
-          <label class="check"><input id="usage-enabled" type="checkbox"> Record detailed foreground active-tab time</label>
-          <p class="warning">Optional and off by default. When enabled, URLs, titles, timestamps, and durations are stored only on this device. This measures selection in the focused Firefox window—not attention.</p>
+          <p class="hint">Recording prepares a history for planned review tools: see how you browse and which tabs sleep, how often they are discarded, and which tabs you might want to protect or allow to sleep. This data may also support more intelligent automatic discarding decisions in future versions.</p>
+          <label class="check"><input id="usage-enabled" type="checkbox"> Record foreground activity and tab discards</label>
+          <p class="warning">Optional and off by default. When enabled, URLs, titles, timestamps, foreground durations, and confirmed tab discards are stored only on this device. This measures selection in the focused Firefox window—not attention.</p>
           <label>Keep history for <span class="input-range">(1–365 days)</span>
             <span class="input-row"><input id="usage-days" type="number" min="1" max="365" required> days</span>
           </label>

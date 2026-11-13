@@ -1,3 +1,5 @@
+import { registerRecorderTests } from "./recorder.test.js";
+import { registerActivityTests } from "./activity.test.js";
 import { inspectEligibility, protectedHostname, protectionReasons, selectEligibleByWindow, selectEligibleTabs } from "../src/core/eligibility.js";
 import { calculateScanInterval, DEFAULT_SETTINGS, normalizeDomain, normalizeSettings } from "../src/core/settings.js";
 import { endLiveRecord, getTabKey, pruneUsage, recoverInterruptedUsage, releaseTabKey, usageSummaryForTab } from "../src/core/usage.js";
@@ -45,6 +47,10 @@ test("repairs invalid settings conservatively", () => {
 test("uses the MVP automatic-discard defaults", () => {
   equal(DEFAULT_SETTINGS.inactivityMinutes, 10);
   equal(DEFAULT_SETTINGS.scanIntervalMinutes, 1);
+  equal(DEFAULT_SETTINGS.usageHistoryDays, 14);
+  equal(DEFAULT_SETTINGS.usageTrackingEnabled, false);
+  equal(normalizeSettings({}).usageHistoryDays, 14);
+  equal(normalizeSettings({ usageHistoryDays: 7 }).usageHistoryDays, 7);
   equal(normalizeSettings({}).minimumLoadedTabsTotal, 0);
 });
 
@@ -270,6 +276,8 @@ test("duplicate tab identities are separated while restored identities are retai
   }
 });
 
+registerActivityTests(test, equal);
+
 test("background module loads against the Firefox API contract", async () => {
   const event = { addListener() {} };
   let onMessage;
@@ -278,7 +286,10 @@ test("background module loads against the Firefox API contract", async () => {
   const failedIds = new Set();
   const alarms = [];
   globalThis.browser = {
-    storage: { local: { async get() { return {}; }, async set() {} } },
+    storage: {
+      local: { async get() { return {}; }, async set() {} },
+      session: { async get() { return {}; }, async set() {}, async remove() {} },
+    },
     alarms: { async clear() {}, create(name, options) { alarms.push({ name, ...options }); }, onAlarm: event },
     runtime: { onMessage: { addListener(listener) { onMessage = listener; } }, onInstalled: event },
     tabs: {
@@ -361,6 +372,8 @@ test("background module loads against the Firefox API contract", async () => {
     delete globalThis.browser;
   }
 });
+
+registerRecorderTests(test, equal);
 
 const results = document.querySelector("#results");
 let failures = 0;

@@ -1,4 +1,5 @@
 import { calculateScanInterval, loadState, normalizeSettings, saveState } from "../core/settings.js";
+import { acceptsRecordingEvent, activityId, canContinueRecording, captureRecordingContext, endCoverage, noteObservationError, startCoverage } from "../core/activity.js";
 import { hostnameMatches, protectedHostname, protectionReasons, selectEligibleByWindow } from "../core/eligibility.js";
 import {
   checkpointUsage,
@@ -6,6 +7,11 @@ import {
   endUsageForTab,
   endUsageForWindow,
   getTabKey,
+  markUsageTabLoaded,
+  observeUsageTab,
+  recordTabAccess,
+  recordUsageDiscard,
+  rebindTabKey,
   pruneUsage,
   releaseTabKey,
   recoverInterruptedUsage,
@@ -24,15 +30,83 @@ const MENU_DOMAIN_PROTECTION = "memory-saver-toggle-domain-protection";
 let state;
 let queue = Promise.resolve();
 let scanRunning = false;
+let browserSessionId = null;
+let lastPersistedRevision = null;
+let recorderHealthy = true;
+const discardAttempts = new Map();
+const BROWSER_SESSION_KEY = "memorySaverRecorderBrowserSession";
+const SUSPENDED_RECORDER_KEY = "memorySaverSuspendedRecorder";
 
 function serialized(task) {
   const result = queue.then(task, task);
-  queue = result.catch((error) => console.error("Memory Saver task failed", error));
+  queue = result.catch((error) => {
+    recorderHealthy = false;
+    if (state?.settings.usageTrackingEnabled) {
+      recoverInterruptedUsage(state);
+      const previous = state.usageCoverage.segments.at(-1);
+      if (previous) endCoverage(state, previous.lastCheckpointAt, "recording-error");
+      startCoverage(state, Date.now(), "recording-error-recovery");
+    }
+    console.error("Memory Saver task failed", error);
+  });
   return result;
 }
 
 async function persist() {
+  if (state.settings.usageTrackingEnabled && checkpointUsage(state)) {
+    await startFocusedTab(Date.now(), "recorder-resumed");
+  }
+  state.usageRecorder.revision += 1;
   state = await saveState(state);
+  lastPersistedRevision = state.usageRecorder.revision;
+  recorderHealthy = true;
+}
+
+async function recorderRuntime() {
+  try {
+    const stored = await browser.storage.session.get([BROWSER_SESSION_KEY, SUSPENDED_RECORDER_KEY]);
+    const sessionId = stored[BROWSER_SESSION_KEY] ?? activityId();
+    await browser.storage.session.set({ [BROWSER_SESSION_KEY]: sessionId });
+    await browser.storage.session.remove(SUSPENDED_RECORDER_KEY);
+    return { sessionId, suspended: stored[SUSPENDED_RECORDER_KEY] };
+  } catch (error) {
+    // Without a trustworthy browser-session marker, recover conservatively.
+    console.warn("Could not read recorder continuity marker", error);
+    return { sessionId: activityId(), suspended: null };
+  }
+}
+
+async function observeOpenTabs(tabs, now, snapshot = false) {
+  if (!state.settings.usageTrackingEnabled) return;
+  const liveKeys = new Set();
+  let allObserved = true;
+  for (const tab of tabs) {
+    try {
+      const metadata = await observeUsageTab(state, tab, now, { snapshot });
+      if (metadata) liveKeys.add(metadata.tabKey);
+    } catch (error) {
+      allObserved = false;
+      noteObservationError(state, now);
+      console.warn(`Could not observe usage for tab ${tab.id}`, error);
+    }
+  }
+  if (!allObserved) return;
+  // Reconcile by persistent key, since numeric Firefox IDs can change or be reused.
+  for (const [key, metadata] of Object.entries(state.usageTabMetadata)) {
+    if (metadata.closedAt == null && !liveKeys.has(key)) {
+      metadata.closedAt = now;
+      delete metadata.tabId;
+      delete metadata.windowId;
+      delete state.liveUsageRecords[key];
+    }
+  }
+}
+
+async function beginRecording(now, reason) {
+  state.usageRecorder.browserSessionId = browserSessionId;
+  startCoverage(state, now, reason);
+  await observeOpenTabs(await browser.tabs.query({}), now, true);
+  await startFocusedTab(now, reason);
 }
 
 function hostnameForMenu(urlValue) {
@@ -167,10 +241,10 @@ async function isWindowFocused(windowId) {
   }
 }
 
-async function startFocusedTab(now = Date.now()) {
+async function startFocusedTab(now = Date.now(), reason = "recorder-start") {
   if (!state.settings.usageTrackingEnabled) return;
   const [tab] = await browser.tabs.query({ active: true, lastFocusedWindow: true });
-  if (tab && await isWindowFocused(tab.windowId)) await startUsageSession(state, tab, now);
+  if (tab && await isWindowFocused(tab.windowId)) await startUsageSession(state, tab, now, reason);
 }
 
 async function saveLastSleep(tabId, sleep) {
@@ -216,6 +290,8 @@ async function discardTabs(tabs, reason) {
   let failedCount = 0;
   for (const tab of tabs) {
     let wasDiscarded = false;
+    const attempt = { source: reason === "automatic" ? "automatic" : "manual", observedAt: null };
+    discardAttempts.set(tab.id, attempt);
     try {
       await browser.tabs.discard(tab.id);
       const confirmed = await browser.tabs.get(tab.id);
@@ -225,8 +301,11 @@ async function discardTabs(tabs, reason) {
       }
       wasDiscarded = true;
       discarded.push(tab.id);
-      const discardedAt = Date.now();
+      state.lifetimeDiscardCount += 1;
+      endUsageForTab(state, tab.id, Date.now(), "discarded");
+      const discardedAt = attempt.observedAt ?? Date.now();
       await saveLastSleep(tab.id, { discardedAt, reason });
+      await recordUsageDiscard(state, confirmed, attempt.source, discardedAt);
       let tabKey;
       if (state.settings.usageTrackingEnabled) tabKey = await getTabKey(tab.id);
       state.discardRecords[String(tab.id)] = {
@@ -240,11 +319,12 @@ async function discardTabs(tabs, reason) {
         lastAccessedAt: tab.lastAccessed,
         reason,
       };
-      state.lifetimeDiscardCount += 1;
-      endUsageForTab(state, tab.id, Date.now(), "discarded");
     } catch (error) {
       if (!wasDiscarded) failedCount += 1;
+      else if (state.settings.usageTrackingEnabled) noteObservationError(state, Date.now());
       console.warn(`Could not discard tab ${tab.id}`, error);
+    } finally {
+      discardAttempts.delete(tab.id);
     }
   }
   await persist();
@@ -330,7 +410,7 @@ async function handleMessage(message) {
       await configureAlarms();
       await reconcileAllTabDiscardability();
       if (!wasTracking && state.settings.usageTrackingEnabled) {
-        await startFocusedTab();
+        await beginRecording(Date.now(), "recording-enabled");
         await persist();
       }
       return { ok: true, data: state.settings };
@@ -338,7 +418,7 @@ async function handleMessage(message) {
     case "CLEAR_USAGE_DATA":
       clearUsage(state);
       await persist();
-      await startFocusedTab();
+      if (state.settings.usageTrackingEnabled) await beginRecording(Date.now(), "history-cleared");
       await persist();
       return { ok: true };
     default:
@@ -364,37 +444,51 @@ browser.menus.onClicked.addListener((info, tab) => {
 browser.alarms.onAlarm.addListener((alarm) => {
   serialized(async () => {
     if (alarm.name === SCAN_ALARM) await runScan();
-    if (alarm.name === USAGE_ALARM && state.settings.usageTrackingEnabled) {
-      checkpointUsage(state);
-      await persist();
-    }
+    if (alarm.name === USAGE_ALARM && state.settings.usageTrackingEnabled) await persist();
   });
 });
 
 browser.tabs.onActivated.addListener((info) => {
+  const now = Date.now();
+  const context = captureRecordingContext(state);
   serialized(async () => {
     delete state.discardRecords[String(info.tabId)];
-    if (state.settings.usageTrackingEnabled && await isWindowFocused(info.windowId)) {
-      const now = Date.now();
+    if (acceptsRecordingEvent(state, context, now)) {
+      const tab = await browser.tabs.get(info.tabId);
+      await recordTabAccess(state, tab, now);
       endUsageForWindow(state, info.windowId, now, "tab-switch");
-      await startUsageSession(state, await browser.tabs.get(info.tabId), now);
+      if (!tab.discarded) await markUsageTabLoaded(state, tab, now);
+      if (await isWindowFocused(info.windowId)) await startUsageSession(state, tab, now, "tab-activation");
     }
     await persist();
   });
 });
 
 browser.tabs.onCreated.addListener((tab) => {
+  const now = Date.now();
+  const context = captureRecordingContext(state);
   serialized(async () => {
     if (!Number.isInteger(tab.id)) return;
     await getTabKey(tab.id, false);
+    if (acceptsRecordingEvent(state, context, now)) {
+      await observeUsageTab(state, tab, now);
+      await persist();
+    }
   });
 });
 
 browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
-  if (!("discarded" in changeInfo) && !("url" in changeInfo)) return;
+  if (!("discarded" in changeInfo) && !("url" in changeInfo) && !("title" in changeInfo)) return;
+  const now = Date.now();
+  const context = captureRecordingContext(state);
+  const attempt = discardAttempts.get(tabId);
+  const discardSource = attempt?.source ?? "external";
+  if (changeInfo.discarded === true && attempt && attempt.observedAt == null) attempt.observedAt = now;
   serialized(async () => {
-    const now = Date.now();
-    if (changeInfo.discarded === false) delete state.discardRecords[String(tabId)];
+    if (changeInfo.discarded === false) {
+      delete state.discardRecords[String(tabId)];
+      if (acceptsRecordingEvent(state, context, now)) await markUsageTabLoaded(state, tab, now);
+    }
     if (changeInfo.discarded === true) {
       if (!state.discardRecords[String(tabId)]) {
         state.discardRecords[String(tabId)] = {
@@ -404,13 +498,26 @@ browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
         };
         await saveLastSleep(tabId, { discardedAt: now, reason: "external" });
       }
-      endUsageForTab(state, tabId, now, "discarded");
+      // recordUsageDiscard also handles deduplication independently of popup records.
+      if (acceptsRecordingEvent(state, context, now)) {
+        await recordUsageDiscard(state, tab, discardSource, now);
+        endUsageForTab(state, tabId, now, "discarded");
+      }
     }
-    if (changeInfo.url && state.settings.usageTrackingEnabled) {
-      const activeRecord = Object.values(state.liveUsageRecords).find((record) => record.tabId === tabId && record.currentSessionStartedAt);
-      if (activeRecord) {
-        endUsageForTab(state, tabId, now, "navigation");
-        await startUsageSession(state, tab, now);
+    if (acceptsRecordingEvent(state, context, now)) {
+      await observeUsageTab(state, tab, now);
+      if (changeInfo.url) {
+        const activeRecord = Object.values(state.liveUsageRecords).find((record) => record.tabId === tabId && record.currentSessionStartedAt != null);
+        if (activeRecord) {
+          endUsageForTab(state, tabId, now, "navigation");
+          await startUsageSession(state, tab, now, "navigation");
+        }
+      } else if ("title" in changeInfo) {
+        const record = Object.values(state.liveUsageRecords).find((item) => item.tabId === tabId);
+        if (record) record.currentTitle = tab.title ?? "";
+      }
+      if (changeInfo.discarded === false && tab.active && await isWindowFocused(tab.windowId)) {
+        await startUsageSession(state, tab, now, "restored");
       }
     }
     if (changeInfo.url) await reconcileTabDiscardability(tab);
@@ -418,25 +525,52 @@ browser.tabs.onUpdated.addListener((tabId, changeInfo, tab) => {
   });
 });
 
+browser.tabs.onDetached?.addListener((tabId) => {
+  const now = Date.now();
+  const context = captureRecordingContext(state);
+  serialized(async () => {
+    if (acceptsRecordingEvent(state, context, now)) endUsageForTab(state, tabId, now, "tab-detached");
+    await persist();
+  });
+});
+
+browser.tabs.onAttached?.addListener((tabId) => {
+  const now = Date.now();
+  const context = captureRecordingContext(state);
+  serialized(async () => {
+    await rebindTabKey(tabId);
+    const tab = await browser.tabs.get(tabId);
+    if (acceptsRecordingEvent(state, context, now)) {
+      await observeUsageTab(state, tab, now);
+      if (tab.active && await isWindowFocused(tab.windowId)) await startUsageSession(state, tab, now, "tab-attached");
+    }
+    await persist();
+  });
+});
+
 browser.tabs.onRemoved.addListener((tabId) => {
+  const now = Date.now();
+  const context = captureRecordingContext(state);
   serialized(async () => {
     delete state.discardRecords[String(tabId)];
-    endUsageForTab(state, tabId, Date.now(), "tab-closed", true);
+    if (acceptsRecordingEvent(state, context, now)) endUsageForTab(state, tabId, now, "tab-closed", true);
     releaseTabKey(tabId);
     await persist();
   });
 });
 
 browser.tabs.onReplaced.addListener((addedTabId, removedTabId) => {
+  const now = Date.now();
+  const context = captureRecordingContext(state);
   serialized(async () => {
-    const now = Date.now();
     delete state.discardRecords[String(removedTabId)];
-    endUsageForTab(state, removedTabId, now, "navigation", true);
+    if (acceptsRecordingEvent(state, context, now)) endUsageForTab(state, removedTabId, now, "tab-replaced", true);
     releaseTabKey(removedTabId);
     try {
       const tab = await browser.tabs.get(addedTabId);
-      if (tab.active && state.settings.usageTrackingEnabled && await isWindowFocused(tab.windowId)) {
-        await startUsageSession(state, tab, now);
+      if (acceptsRecordingEvent(state, context, now)) {
+        await observeUsageTab(state, tab, now);
+        if (tab.active && await isWindowFocused(tab.windowId)) await startUsageSession(state, tab, now, "tab-replaced");
       }
       await reconcileTabDiscardability(tab);
     } catch {
@@ -448,28 +582,74 @@ browser.tabs.onReplaced.addListener((addedTabId, removedTabId) => {
 });
 
 browser.windows.onFocusChanged.addListener((windowId) => {
+  const now = Date.now();
+  const context = captureRecordingContext(state);
   serialized(async () => {
-    const now = Date.now();
+    if (!acceptsRecordingEvent(state, context, now)) return;
     for (const record of Object.values(state.liveUsageRecords)) {
-      if (record.currentSessionStartedAt) endUsageForWindow(state, record.windowId, now, "window-blur");
+      if (record.currentSessionStartedAt != null) endUsageForWindow(state, record.windowId, now, "window-blur");
     }
     if (windowId !== browser.windows.WINDOW_ID_NONE && state.settings.usageTrackingEnabled) {
       const [tab] = await browser.tabs.query({ active: true, windowId });
-      if (tab) await startUsageSession(state, tab, now);
+      if (tab) await startUsageSession(state, tab, now, "window-focus");
     }
     await persist();
   });
 });
 
 browser.windows.onRemoved.addListener((windowId) => {
+  const now = Date.now();
+  const context = captureRecordingContext(state);
   serialized(async () => {
-    endUsageForWindow(state, windowId, Date.now(), "window-blur");
+    if (acceptsRecordingEvent(state, context, now)) endUsageForWindow(state, windowId, now, "window-closed");
     await persist();
   });
 });
 
+// A best-effort marker authorizes continuation only after a clean idle suspension.
+// If this write cannot complete, the next startup falls back to the disk checkpoint.
+browser.runtime.onSuspend?.addListener(() => {
+  if (!state?.settings.usageTrackingEnabled || !recorderHealthy || lastPersistedRevision == null) return;
+  browser.storage.session?.set({
+    [SUSPENDED_RECORDER_KEY]: { browserSessionId, revision: lastPersistedRevision },
+  }).catch((error) => console.warn("Could not mark recorder suspension", error));
+});
+
+browser.runtime.onSuspendCanceled?.addListener(() => {
+  browser.storage.session?.remove(SUSPENDED_RECORDER_KEY)
+    .catch((error) => console.warn("Could not clear recorder suspension", error));
+});
+
+async function reconcileRecorderForeground(checkpoints = new Map()) {
+  if (!state.settings.usageTrackingEnabled) return;
+  const now = Date.now();
+  const tabs = await browser.tabs.query({});
+  for (const record of Object.values(state.liveUsageRecords)) {
+    if (record.currentSessionStartedAt == null) continue;
+    const tab = tabs.find((item) => item.id === record.tabId);
+    const sameTab = tab && await getTabKey(tab.id) === record.tabKey;
+    const sameForeground = sameTab && tab.active && !tab.discarded
+      && await isWindowFocused(tab.windowId) && record.currentUrl === tab.url;
+    if (!sameForeground) {
+      const saved = checkpoints.get(record.tabKey);
+      const checkpoint = saved?.startedAt === record.currentSessionStartedAt
+        ? saved.checkpointAt : record.lastCheckpointAt;
+      endUsageForTab(state, record.tabId, checkpoint, "foreground-uncertain");
+      const previous = state.usageCoverage.segments.at(-1);
+      if (previous) endCoverage(state, Math.min(previous.lastCheckpointAt, checkpoint), "foreground-uncertain");
+      startCoverage(state, now, "recorder-start");
+    }
+  }
+  await observeOpenTabs(tabs, now, true);
+  await startFocusedTab(now);
+  await persist();
+}
+
 async function initialize() {
   state = await loadState();
+  const runtime = await recorderRuntime();
+  browserSessionId = runtime.sessionId;
+  const now = Date.now();
   const tabs = await browser.tabs.query({});
   for (const tab of tabs.filter((item) => Number.isInteger(item.id)).sort((a, b) => a.id - b.id)) {
     try {
@@ -478,13 +658,37 @@ async function initialize() {
       console.warn(`Could not check tab identity for ${tab.id}`, error);
     }
   }
-  recoverInterruptedUsage(state);
-  pruneUsage(state);
+  const continuation = state.settings.usageTrackingEnabled
+    && canContinueRecording(state, browserSessionId, runtime.suspended, now);
+  const checkpoints = new Map(Object.entries(state.liveUsageRecords).map(([key, record]) => [key, {
+    startedAt: record.currentSessionStartedAt, checkpointAt: record.lastCheckpointAt ?? record.currentSessionStartedAt,
+  }]));
+  if (!state.settings.usageTrackingEnabled) {
+    // Also remove any legacy detailed history left behind while tracking was off.
+    clearUsage(state);
+  } else {
+    if (!continuation) {
+      recoverInterruptedUsage(state);
+      const previous = state.usageCoverage.segments.at(-1);
+      if (previous) endCoverage(state, previous.lastCheckpointAt, "recorder-interrupted");
+      startCoverage(state, now, "recorder-start");
+      await observeOpenTabs(tabs, now, true);
+      await startFocusedTab(now);
+    }
+    state.usageRecorder.browserSessionId = browserSessionId;
+  }
+  pruneUsage(state, now);
   await reconcileRecords();
   await reconcileAllTabDiscardability();
   await configureAlarms();
-  await startFocusedTab();
-  await persist();
+  if (continuation) {
+    // Wake-triggering activation/focus/navigation events are already queued. Let
+    // them close the old interval at their captured event time before reconciling.
+    // Do not checkpoint the old foreground state until those events run.
+    serialized(() => reconcileRecorderForeground(checkpoints));
+  } else {
+    await persist();
+  }
 }
 
 serialized(initialize);

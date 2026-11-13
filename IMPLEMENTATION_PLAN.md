@@ -1,3 +1,7 @@
+> The schema-2 recording foundation and its implemented lifecycle behavior are
+> documented in [Activity recording](docs/ACTIVITY_RECORDING.md). The review views
+> remain planned; older schema examples below describe the original design.
+
 # Firefox Memory Saver — Implementation Plan
 
 Status: In implementation  
@@ -200,7 +204,7 @@ Tab IDs only live for the current browser session. Each tab receives a random
 `tabKey` stored with `sessions.setTabValue()`, which survives Firefox's normal
 close/restore flow. On startup, live records must still be reconciled with the
 actual open tabs. Completed usage sessions are retained for a configurable,
-bounded period (default: 7 days) and deleted immediately when the user chooses
+bounded period (default: 14 days) and deleted immediately when the user chooses
 "Clear usage data."
 
 ## 7. Eligibility rules
@@ -311,7 +315,7 @@ derived from timestamps using a single captured
 
 Usage tracking is opt-in and disabled by default. Its data remains in
 `browser.storage.local`; it is never transmitted. The default retention after
-opt-in is 7 days, configurable from 1 to 365 days. Settings provide a one-click
+opt-in is 14 days, configurable from 1 to 365 days. Settings provide a one-click
 "Clear usage data" action. Disabling tracking closes the current session and
 deletes all usage history. The privacy notice must explain that URLs, titles,
 timestamps, and foreground durations are stored locally.
@@ -386,7 +390,7 @@ Settings:
 - Protect audible tabs.
 - Protected domains, one hostname per entry.
 - Record detailed foreground tab activity (off by default).
-- Usage-history retention: 1 to 365 days (default: 7).
+- Usage-history retention: 1 to 365 days (default: 14).
 - Clear locally stored usage data.
 - Reset settings.
 

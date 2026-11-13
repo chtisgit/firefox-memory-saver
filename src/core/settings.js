@@ -1,3 +1,5 @@
+import { ACTIVITY_SCHEMA_VERSION, emptyActivityState, normalizeActivityState } from "./activity.js";
+
 export const STORAGE_KEY = "memorySaverState";
 
 export const DEFAULT_SETTINGS = Object.freeze({
@@ -11,7 +13,7 @@ export const DEFAULT_SETTINGS = Object.freeze({
   protectAudible: true,
   protectedDomains: [],
   usageTrackingEnabled: false,
-  usageHistoryDays: 7,
+  usageHistoryDays: 14,
 });
 
 const limits = {
@@ -67,7 +69,8 @@ export function normalizeSettings(value = {}) {
 
 export function emptyState() {
   return {
-    schemaVersion: 1,
+    schemaVersion: ACTIVITY_SCHEMA_VERSION,
+    ...emptyActivityState(),
     settings: { ...DEFAULT_SETTINGS },
     discardRecords: {},
     liveUsageRecords: {},
@@ -81,7 +84,8 @@ export function normalizeState(value = {}) {
   return {
     ...initial,
     ...value,
-    schemaVersion: 1,
+    ...normalizeActivityState(value),
+    schemaVersion: ACTIVITY_SCHEMA_VERSION,
     settings: normalizeSettings(value.settings),
     discardRecords: value.discardRecords && typeof value.discardRecords === "object" ? value.discardRecords : {},
     liveUsageRecords: value.liveUsageRecords && typeof value.liveUsageRecords === "object" ? value.liveUsageRecords : {},
