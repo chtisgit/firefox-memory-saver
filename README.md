@@ -21,6 +21,7 @@ ordinary text Git objects.
 - Popup actions for discarding eligible tabs and restoring discarded tabs.
 - Reconciliation with tabs discarded by Firefox or other extensions.
 - Optional foreground activity and confirmed tab-discard recording, disabled by default.
+- A cooperation API for other extensions to temporarily protect tabs.
 
 Memory quantities are intentionally not shown. Firefox does not expose exact
 per-tab memory usage to ordinary WebExtensions, and estimates are future work.
@@ -31,6 +32,26 @@ and protected tabs are kept in addition to these minimums. The limits apply to
 discards initiated by Memory Saver; Firefox,
 other extensions, or closing tabs can reduce the number of loaded tabs below
 those limits. The total minimum defaults to 0, adding no restriction unless set.
+
+## Cooperation with other extensions
+
+Other Firefox extensions can request renewable protection for multiple tabs,
+with an independent maximum duration of one hour per tab per request. Protection
+applies to both Memory Saver's automatic and manual discarding, expires unless renewed, and
+appears in the popup with the requesting extension's ID. It is independent of
+manual protection and does not require activity recording. The **Allow other
+extensions to protect tabs** checkbox under **Protected tabs** is enabled by
+default. Turning it off and saving blocks API requests and removes existing
+external protection leases.
+
+**Extension developers: start with the [lightweight client guide](docs/EXTENSION_CLIENT.md).**
+It explains how to copy the dependency-free JavaScript client into your extension
+and acquire, renew, or release protection. For direct messaging and full protocol
+details, see the [API reference](docs/EXTENSION_API.md).
+
+The API and client are in the development sources and were not included in the
+tagged v0.3.0 release. Protection controls Memory Saver, not Firefox's native
+unloading or other extensions.
 
 ## Load in Firefox
 

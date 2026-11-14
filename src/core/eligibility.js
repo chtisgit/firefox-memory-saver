@@ -15,11 +15,14 @@ export function protectedHostname(urlValue, protectedDomains) {
   }
 }
 
-export function protectionReasons(tab, settings) {
+export function protectionReasons(tab, settings, now = Date.now()) {
   if (!Number.isInteger(tab?.id) || tab.discarded) return [];
 
   const reasons = [];
   if (tab.memorySaverProtected) reasons.push({ type: "tab" });
+  for (const protection of tab.externalProtections ?? []) {
+    if (protection.expiresAt > now) reasons.push({ type: "extension", ...protection });
+  }
   if (settings.protectPinned && tab.pinned) reasons.push({ type: "pinned" });
   if (settings.protectAudible && tab.audible) reasons.push({ type: "audible" });
 
@@ -45,6 +48,9 @@ export function inspectEligibility(tab, settings, now = Date.now(), options = {}
   if (tab.active) return { eligible: false, reason: "active" };
   if (tab.discarded) return { eligible: false, reason: "already-discarded" };
   if (tab.memorySaverProtected) return { eligible: false, reason: "protected-tab" };
+  if (tab.externalProtections?.some((protection) => protection.expiresAt > now)) {
+    return { eligible: false, reason: "protected-extension" };
+  }
   if (settings.protectPinned && tab.pinned) return { eligible: false, reason: "pinned" };
   if (settings.protectAudible && tab.audible) return { eligible: false, reason: "audible" };
 

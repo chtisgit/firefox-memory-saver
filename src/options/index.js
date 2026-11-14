@@ -8,6 +8,7 @@ const fields = {
   minimumLoadedTabsTotal: document.querySelector("#minimum-loaded-total"),
   protectPinned: document.querySelector("#protect-pinned"),
   protectAudible: document.querySelector("#protect-audible"),
+  allowExternalProtection: document.querySelector("#allow-external-protection"),
   protectedDomains: document.querySelector("#domains"),
   usageTrackingEnabled: document.querySelector("#usage-enabled"),
   usageHistoryDays: document.querySelector("#usage-days"),
@@ -32,6 +33,7 @@ function populate(settings) {
   fields.minimumLoadedTabsTotal.value = settings.minimumLoadedTabsTotal;
   fields.protectPinned.checked = settings.protectPinned;
   fields.protectAudible.checked = settings.protectAudible;
+  fields.allowExternalProtection.checked = settings.allowExternalProtection;
   fields.protectedDomains.value = settings.protectedDomains.join("\n");
   fields.usageTrackingEnabled.checked = settings.usageTrackingEnabled;
   fields.usageHistoryDays.value = settings.usageHistoryDays;
@@ -50,6 +52,7 @@ function readSettings() {
     minimumLoadedTabsTotal: Number(fields.minimumLoadedTabsTotal.value),
     protectPinned: fields.protectPinned.checked,
     protectAudible: fields.protectAudible.checked,
+    allowExternalProtection: fields.allowExternalProtection.checked,
     protectedDomains: rawDomains,
     usageTrackingEnabled: fields.usageTrackingEnabled.checked,
     usageHistoryDays: Number(fields.usageHistoryDays.value),

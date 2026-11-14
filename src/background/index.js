@@ -1,3 +1,4 @@
+import { ExternalProtection, ExternalProtectionError, EXTERNAL_PROTECTION_ALARM } from "../core/external-protection.js";
 import { calculateScanInterval, loadState, normalizeSettings, saveState } from "../core/settings.js";
 import { acceptsRecordingEvent, activityId, canContinueRecording, captureRecordingContext, endCoverage, noteObservationError, startCoverage } from "../core/activity.js";
 import { hostnameMatches, protectedHostname, protectionReasons, selectEligibleByWindow } from "../core/eligibility.js";
@@ -27,6 +28,8 @@ const LAST_SLEEP_KEY = "memorySaverLastSleep";
 const MENU_ROOT = "memory-saver-menu";
 const MENU_TAB_PROTECTION = "memory-saver-toggle-tab-protection";
 const MENU_DOMAIN_PROTECTION = "memory-saver-toggle-domain-protection";
+const externalProtection = new ExternalProtection();
+let externalProtectionLoaded = false;
 let state;
 let queue = Promise.resolve();
 let scanRunning = false;
@@ -162,10 +165,42 @@ async function reconcileAllTabDiscardability() {
   })));
 }
 
+function notifyExternalProtectionChanged() {
+  browser.runtime.sendMessage({ type: "EXTERNAL_PROTECTION_CHANGED" }).catch(() => {});
+}
+
+async function loadExternalProtection(tabs) {
+  if (externalProtectionLoaded) return;
+  await externalProtection.load(tabs);
+  if (!state.settings.allowExternalProtection) await externalProtection.clear();
+  externalProtectionLoaded = true;
+}
+
+async function refreshExternalProtection(tabs) {
+  if (!state.settings.allowExternalProtection) return;
+  // A failed startup read is retried before eligibility is evaluated. Never
+  // discard using an unknown set of previously accepted protection requests.
+  await loadExternalProtection(tabs);
+  if (await externalProtection.prune(tabs)) notifyExternalProtectionChanged();
+}
+
+async function forgetExternalProtection(tabId) {
+  try {
+    if (await externalProtection.forgetTab(tabId)) notifyExternalProtectionChanged();
+  } catch (error) {
+    // Lease deletion is already applied in memory. Keep tab identity and recorder
+    // cleanup running; stale disk entries will be checked against live identities.
+    notifyExternalProtectionChanged();
+    console.warn(`Could not persist external protection removal for tab ${tabId}`, error);
+  }
+}
+
 async function tabsWithProtection(tabs) {
+  await refreshExternalProtection(tabs);
   return Promise.all(tabs.map(async (tab) => ({
     ...tab,
     memorySaverProtected: await getTabBoolean(tab.id, TAB_PROTECTION_KEY),
+    externalProtections: state.settings.allowExternalProtection ? externalProtection.forTab(tab.id) : [],
   })));
 }
 
@@ -407,6 +442,9 @@ async function handleMessage(message) {
       if (wasTracking && !state.settings.usageTrackingEnabled) clearUsage(state);
       pruneUsage(state);
       await persist();
+      if (!state.settings.allowExternalProtection && await externalProtection.clear()) {
+        notifyExternalProtectionChanged();
+      }
       await configureAlarms();
       await reconcileAllTabDiscardability();
       if (!wasTracking && state.settings.usageTrackingEnabled) {
@@ -428,6 +466,28 @@ async function handleMessage(message) {
 
 browser.runtime.onMessage.addListener((message) => serialized(() => handleMessage(message)).catch((error) => ({ ok: false, error: error.message })));
 
+browser.runtime.onMessageExternal.addListener((message, sender) => {
+  console.info("Memory Saver external API request", { senderId: sender?.id ?? null, request: message });
+  return serialized(async () => {
+    // Expected protocol errors must not enter the recorder's task-failure recovery.
+    try {
+      if (!state.settings.allowExternalProtection) {
+        return { ok: false, error: { code: "API_DISABLED", message: "The user has disabled protection requests from other extensions." } };
+      }
+      await refreshExternalProtection(await browser.tabs.query({}));
+      const data = await externalProtection.handle(message, sender);
+      if (["set-protected-tab", "release-protected-tab", "release-all-protected-tabs"].includes(message.type)) notifyExternalProtectionChanged();
+      return { ok: true, data };
+    } catch (error) {
+      if (error instanceof ExternalProtectionError) {
+        return { ok: false, error: { code: error.code, message: error.message } };
+      }
+      console.warn("Memory Saver external API failed", error);
+      return { ok: false, error: { code: "INTERNAL_ERROR", message: "Could not update external protection. Retry the request." } };
+    }
+  });
+});
+
 browser.runtime.onInstalled.addListener(() => {
   createContextMenus().catch((error) => console.error("Could not create Memory Saver menus", error));
 });
@@ -443,6 +503,10 @@ browser.menus.onClicked.addListener((info, tab) => {
 
 browser.alarms.onAlarm.addListener((alarm) => {
   serialized(async () => {
+    if (alarm.name === EXTERNAL_PROTECTION_ALARM) {
+      await refreshExternalProtection(await browser.tabs.query({}));
+      await externalProtection.schedule();
+    }
     if (alarm.name === SCAN_ALARM) await runScan();
     if (alarm.name === USAGE_ALARM && state.settings.usageTrackingEnabled) await persist();
   });
@@ -553,6 +617,7 @@ browser.tabs.onRemoved.addListener((tabId) => {
   const context = captureRecordingContext(state);
   serialized(async () => {
     delete state.discardRecords[String(tabId)];
+    await forgetExternalProtection(tabId);
     if (acceptsRecordingEvent(state, context, now)) endUsageForTab(state, tabId, now, "tab-closed", true);
     releaseTabKey(tabId);
     await persist();
@@ -564,6 +629,7 @@ browser.tabs.onReplaced.addListener((addedTabId, removedTabId) => {
   const context = captureRecordingContext(state);
   serialized(async () => {
     delete state.discardRecords[String(removedTabId)];
+    await forgetExternalProtection(removedTabId);
     if (acceptsRecordingEvent(state, context, now)) endUsageForTab(state, removedTabId, now, "tab-replaced", true);
     releaseTabKey(removedTabId);
     try {
@@ -657,6 +723,11 @@ async function initialize() {
     } catch (error) {
       console.warn(`Could not check tab identity for ${tab.id}`, error);
     }
+  }
+  try {
+    await loadExternalProtection(tabs);
+  } catch (error) {
+    console.warn("Could not load external protection; will retry before evaluating eligibility", error);
   }
   const continuation = state.settings.usageTrackingEnabled
     && canContinueRecording(state, browserSessionId, runtime.suspended, now);

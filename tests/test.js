@@ -1,3 +1,5 @@
+import { registerClientTests } from "./memory-saver-client.test.js";
+import { registerExternalProtectionTests } from "./external-protection.test.js";
 import { registerRecorderTests } from "./recorder.test.js";
 import { registerActivityTests } from "./activity.test.js";
 import { inspectEligibility, protectedHostname, protectionReasons, selectEligibleByWindow, selectEligibleTabs } from "../src/core/eligibility.js";
@@ -25,6 +27,13 @@ function tab(overrides = {}) {
     ...overrides,
   };
 }
+
+test("external protection defaults on for new and older settings, while preserving an explicit opt-out", () => {
+  equal(DEFAULT_SETTINGS.allowExternalProtection, true);
+  equal(normalizeSettings({}).allowExternalProtection, true);
+  equal(normalizeSettings({ allowExternalProtection: false }).allowExternalProtection, false);
+  equal(normalizeSettings({ allowExternalProtection: "false" }).allowExternalProtection, true);
+});
 
 test("normalizes domains and subdomain input", () => {
   equal(normalizeDomain(" HTTPS://Mail.Example.com/path "), "mail.example.com");
@@ -291,7 +300,7 @@ test("background module loads against the Firefox API contract", async () => {
       session: { async get() { return {}; }, async set() {}, async remove() {} },
     },
     alarms: { async clear() {}, create(name, options) { alarms.push({ name, ...options }); }, onAlarm: event },
-    runtime: { onMessage: { addListener(listener) { onMessage = listener; } }, onInstalled: event },
+    runtime: { onMessage: { addListener(listener) { onMessage = listener; } }, onInstalled: event, onMessageExternal: event, async sendMessage() {} },
     tabs: {
       async query(query = {}) {
         return queriedTabs.filter((item) => query.active == null || item.active === query.active);
@@ -374,6 +383,8 @@ test("background module loads against the Firefox API contract", async () => {
 });
 
 registerRecorderTests(test, equal);
+registerExternalProtectionTests(test, equal);
+registerClientTests(test, equal);
 
 const results = document.querySelector("#results");
 let failures = 0;

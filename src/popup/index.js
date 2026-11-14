@@ -174,6 +174,7 @@ function createTabRow(record) {
 }
 
 function protectionLabel(reason) {
+  if (reason.type === "extension") return `Protected by extension: ${reason.extensionId}`;
   return {
     tab: "Protected manually",
     pinned: "Pinned tab",
@@ -369,5 +370,11 @@ if (!standalone) {
   resizeObserver.observe(elements.main);
   window.addEventListener("resize", sizeTabList);
 }
+
+browser.runtime.onMessage.addListener((message) => {
+  if (message?.type === "EXTERNAL_PROTECTION_CHANGED") {
+    refresh().catch((error) => showNotice(error.message, true));
+  }
+});
 
 refresh().catch((error) => showNotice(error.message, true));

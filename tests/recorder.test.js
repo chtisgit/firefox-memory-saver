@@ -3,14 +3,20 @@ import { releaseTabKey } from "../src/core/usage.js";
 
 let instance = 0;
 const clone = (value) => structuredClone(value);
-const makeTab = (id, overrides = {}) => ({ id, windowId: 1, active: false, discarded: false, autoDiscardable: true,
+export const makeTab = (id, overrides = {}) => ({ id, windowId: 1, active: false, discarded: false, autoDiscardable: true,
   title: `Tab ${id}`, url: `https://site${id}.example`, lastAccessed: 1, ...overrides });
 
 // Uses actual background listeners/messages with in-memory Firefox API contracts.
-async function recorderHarness({ enabled = true, tabs = [makeTab(2001, { active: true }), makeTab(2002)], diskState, tabValues = {} } = {}) {
+export async function recorderHarness({ enabled = true, tabs = [makeTab(2001, { active: true }), makeTab(2002)], diskState, tabValues = {} } = {}) {
   const originalBrowser = globalThis.browser;
   const originalNow = Date.now;
   const originalError = console.error;
+  const originalInfo = console.info;
+  const originalWarn = console.warn;
+  const warnings = [];
+  const leaseWriteFailures = [];
+  const leaseReadFailures = [];
+  const apiLogs = [];
   const errors = [];
   const knownIds = new Set(tabs.map((tab) => tab.id));
   let now = 20 * 86_400_000;
@@ -22,6 +28,10 @@ async function recorderHarness({ enabled = true, tabs = [makeTab(2001, { active:
   let gate = null;
   const values = new Map(Object.entries(tabValues).map(([id, value]) => [Number(id), clone(value)]));
   const refused = new Set();
+  const alarms = new Map();
+  const notifications = [];
+  console.warn = (...args) => warnings.push(args);
+  console.info = (...args) => apiLogs.push(clone(args));
   Date.now = () => now;
   console.error = (...args) => errors.push(args.map(String).join(' '));
   const event = name => ({ addListener(fn) { listeners[name] = fn; } });
@@ -33,13 +43,21 @@ async function recorderHarness({ enabled = true, tabs = [makeTab(2001, { active:
         async set(value) { Object.assign(disk, clone(value)); },
       },
       session: {
-        async get() { return clone(session); },
-        async set(value) { Object.assign(session, clone(value)); },
+        async get(key) {
+          if (key === "memorySaverExternalProtections" && leaseReadFailures.length) throw leaseReadFailures.shift();
+          return clone(session);
+        },
+        async set(value) {
+          if (Object.hasOwn(value, "memorySaverExternalProtections") && leaseWriteFailures.length) {
+            throw leaseWriteFailures.shift();
+          }
+          Object.assign(session, clone(value));
+        },
         async remove(key) { delete session[key]; },
       },
     },
-    runtime: { onMessage: event('message'), onInstalled: event('installed'), onSuspend: event('suspend'), onSuspendCanceled: event('suspendCanceled') },
-    alarms: { async clear() {}, async create() {}, onAlarm: event('alarm') },
+    runtime: { id: '@firefox-memory-saver-hero', onMessageExternal: event('externalMessage'), async sendMessage(message) { notifications.push(clone(message)); }, onMessage: event('message'), onInstalled: event('installed'), onSuspend: event('suspend'), onSuspendCanceled: event('suspendCanceled') },
+    alarms: { async clear(name) { return alarms.delete(name); }, async create(name, options) { alarms.set(name, clone(options)); }, onAlarm: event('alarm') },
     tabs: {
       async query(q = {}) { return clone(tabs.filter(tab => (q.active == null || tab.active === q.active)
         && (q.windowId == null || tab.windowId === q.windowId)
@@ -89,10 +107,11 @@ async function recorderHarness({ enabled = true, tabs = [makeTab(2001, { active:
     await flush();
   };
   try { await load(); } catch (error) {
-    Date.now = originalNow; console.error = originalError; globalThis.browser = originalBrowser; throw error;
+    Date.now = originalNow; console.error = originalError; console.info = originalInfo; console.warn = originalWarn; globalThis.browser = originalBrowser; throw error;
   }
   return {
-    state, request, flush, load, tabs, values, refused,
+    state, request, flush, load, tabs, values, refused, alarms, notifications, apiLogs, warnings, leaseWriteFailures, leaseReadFailures,
+    external(message, id = "sidebar@example.org") { return listeners.externalMessage(message, { id }); },
     advance(ms) { now += ms; }, now: () => now,
     activate,
     emit(name, ...args) { listeners[name](...args); },
@@ -108,7 +127,7 @@ async function recorderHarness({ enabled = true, tabs = [makeTab(2001, { active:
     async dispose() {
       await flush();
       for (const id of knownIds) releaseTabKey(id);
-      Date.now = originalNow; console.error = originalError; globalThis.browser = originalBrowser;
+      Date.now = originalNow; console.error = originalError; console.info = originalInfo; console.warn = originalWarn; globalThis.browser = originalBrowser;
       if (errors.length) throw new Error(errors.join('\n'));
     },
   };
