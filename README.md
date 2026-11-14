@@ -70,7 +70,9 @@ than Firefox on desktop. Temporary extensions are removed when Firefox closes.
 
 Open `tests/index.html` in Firefox, or run `node tests/run.mjs` with Node.js 22
 or newer. Both run the same suite for settings normalization, eligibility,
-selection budgets, activity migration and retention, and recorder event handling.
+selection budgets, history reset/storage/retention, and recorder event handling.
+Browser tests use native IndexedDB; Node uses an asynchronous IndexedDB contract
+double. No dependency installation is required.
 The recorder integration tests use mocked Firefox APIs; a real Firefox smoke test
 across an extension reload and browser restart is also required before publishing.
 
@@ -88,7 +90,10 @@ archive is unsigned; AMO signing is required for normal Firefox installation.
 ## Privacy
 
 The extension does not transmit data and does not inject scripts into webpages.
-Its settings and discard records stay in `browser.storage.local`. Per-tab discard
+Settings and current discard records use separate small entries in
+`browser.storage.local`; detailed activity history uses indexed records in
+IndexedDB. Opening the popup does not save history, and optional activity totals
+load separately from its controls. Per-tab discard
 protection is stored in Firefox session data so it follows a normally restored tab.
 The most recent observed sleep time and cause are also stored in the tab's Firefox
 session data, independently of optional usage tracking. If a tab is discovered
@@ -111,7 +116,12 @@ when its last retained record does. This is active-tab time, not proof of
 attention or interaction. Disabling the feature or confirming **Clear usage data**
 deletes its detailed activity history. No detailed history is collected while
 recording is disabled. See [Activity recording](docs/ACTIVITY_RECORDING.md) for
-the schema, migration, and recovery behavior.
+the schema, storage layout, and recovery behavior.
+
+The switch to IndexedDB deliberately resets history previously embedded in the
+old settings/state entry. There is no history migration. Saved settings, the
+recording preference, manual protection, recent sleep metadata, and lifetime
+discard count are preserved; detailed recording starts fresh if enabled.
 
 See [IMPLEMENTATION_PLAN.md](IMPLEMENTATION_PLAN.md) for architecture, milestones,
 and acceptance criteria.

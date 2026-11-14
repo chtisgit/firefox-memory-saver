@@ -26,6 +26,7 @@ const elements = {
 };
 
 let popupState;
+let refreshVersion = 0;
 let selectedView = "sleeping";
 const windowParams = new URLSearchParams(window.location.search);
 const standalone = windowParams.has("window");
@@ -298,8 +299,21 @@ function showNotice(message, error = false) {
 }
 
 async function refresh() {
-  popupState = await request({ type: "GET_POPUP_STATE", ...(standalone ? { targetTabId } : {}) });
+  const version = ++refreshVersion;
+  const data = await request({ type: "GET_POPUP_STATE", ...(standalone ? { targetTabId } : {}) });
+  if (version !== refreshVersion) return;
+  popupState = data;
   render();
+  if (data.settings.usageTrackingEnabled) {
+    const tabIds = [...new Set([data.currentTab?.id, ...data.discardedTabs.map(tab => tab.tabId)].filter(Number.isInteger))];
+    // History figures are optional: render all controls before requesting them.
+    request({ type: "GET_TAB_USAGE", tabIds }).then(usages => {
+      if (version !== refreshVersion) return;
+      if (popupState.currentTab) popupState.currentTab.usage = usages[popupState.currentTab.id];
+      for (const tab of popupState.discardedTabs) tab.usage = usages[tab.tabId];
+      render();
+    }).catch(error => console.warn("Could not load activity summaries", error));
+  }
 }
 
 async function runDiscard() {

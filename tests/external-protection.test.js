@@ -269,6 +269,8 @@ export function registerExternalProtectionTests(test, equal) {
       equal((await popup(h)).eligibleDiscardCount, 1);
       equal((await popup(h)).protectedTabs, []);
       equal(h.tabs.find(t => t.id === 2002).discarded, false);
+      // Popup reads no longer prune/write leases; the expiry alarm does cleanup.
+      h.emit('alarm', { name: EXTERNAL_PROTECTION_ALARM }); await h.flush();
       equal(h.alarms.has(EXTERNAL_PROTECTION_ALARM), false);
       equal((await h.request({ type: 'DISCARD_ELIGIBLE_NOW' })).discardedTabIds, [2002]);
     } finally { await h.dispose(); }

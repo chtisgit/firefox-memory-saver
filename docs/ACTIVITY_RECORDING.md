@@ -1,29 +1,59 @@
-# Local activity recording, schema 2
+# Local activity recording
 
 This release collects the raw data needed by the planned Summary, By website,
 and Timeline views. It does not implement those views. Recording remains opt-in
 and off by default. New/default configurations retain up to 14 days; existing
 saved retention preferences are preserved.
 
-## Storage and migration
+## Storage and the history reset
 
-The background owns `browser.storage.local.memorySaverState`. Its top-level
-`schemaVersion` is now 2; the settings object's version remains 1. Normalization
-migrates existing sessions and settings without generating historical sleep
-counts, first-observation dates, or reliable coverage for old data.
+Settings live in the small `browser.storage.local.memorySaverSettings` entry.
+`memorySaverRuntime` contains only current sleeping-tab records and the lifetime
+discard counter. Neither entry contains foreground sessions, detailed discard
+events, recorder intervals, tab observation history, or coverage history.
 
-| Field | Contents |
-| --- | --- |
-| `usageSessions[]` | Completed foreground intervals, including records for closed tabs. |
-| `liveUsageRecords[tabKey]` | The ongoing interval, current recorded URL/title, window, and checkpoint. |
-| `usageDiscardEvents[]` | Confirmed sleep transitions, independent of foreground intervals and current sleeping-tab records. |
-| `usageTabMetadata[tabKey]` | Per-tab observation, access, activation, closure, and discard-episode metadata. |
-| `usageCoverage` | Recording segments, legacy-history flag, and retention/cap boundaries. |
-| `usageRecorder` | Browser-session token and persisted revision for conservative recovery. |
+Detailed history uses the `memory-saver-history` IndexedDB database (database
+version 1; activity record schema 2):
 
-`discardRecords`, `memorySaverLastSleep`, manual protection, and the lifetime
-discard counter keep their existing roles. They are not detailed usage history.
-An extension update does not reset the user's recording preference.
+| Object store | Key / contents | Indexes |
+| --- | --- | --- |
+| `sessions` | `sessionId`; completed foreground intervals, including closed tabs | End time, tab key, compound tab key/end time |
+| `discards` | `eventId`; confirmed sleep transitions | Observation time, tab key |
+| `coverage` | Segment `id`; recording coverage intervals | Checkpoint time, sequence |
+| `tabs` | `tabKey`; observation, access, activation, closure, and discard-episode metadata | Open/closed status |
+| `live` | `tabKey`; ongoing intervals and their current URL/title/checkpoint | Primary key |
+| `checkpoint` | `recorder`; coverage boundaries, current segment, browser token, revision, sequence counter | Primary key |
+
+Completed sessions and sleep events are appended as individual records. Updated
+live intervals and tab metadata are written only when changed. History changes
+and their recorder checkpoint commit in one transaction; failed transactions
+leave pending records available for retry. Clearing resets the collection in a
+single transaction. Sequence numbers preserve per-collection observation order,
+including tied timestamps; they do not claim to reproduce every browser action.
+
+Startup reads the recorder checkpoint and open-tab state, not completed history.
+Memory holds open-tab metadata, live intervals, one current coverage segment,
+and small pending write buffers. Closed-tab metadata is read by key only when a
+restored tab needs it. Per-tab summaries use the compound tab/time index.
+Retention and caps delete records through indexes rather than loading all
+history into a JavaScript object.
+
+**There is no history migration.** On first use of this storage layout, settings
+and ordinary operational data are extracted from the old `memorySaverState`
+entry, then that entry is removed with all its embedded history. Existing
+foreground sessions, detailed sleep events, tab metadata, and coverage start
+fresh. No old records are copied into IndexedDB. The recording preference and
+retention preference are preserved; recording restarts if previously enabled.
+The old large entry must be read once to retain settings, but is never read on
+subsequent startup after cleanup succeeds.
+
+`discardRecords`, `memorySaverLastSleep`, manual protection, persistent tab keys,
+and the lifetime discard counter keep their independent operational roles.
+
+Settings reads fetch only their small dedicated entry. Popup base reads bypass
+the recorder queue and perform no persistence; optional usage summaries are
+requested separately after its controls render. Normal recorder writes never
+resubmit the complete history to `browser.storage.local`.
 
 ## Identity and tab metadata
 
@@ -35,8 +65,8 @@ Recording registers every accessible open tab, including sleeping and protected
 tabs that have never been foregrounded. Navigation keeps the key. Duplicates get
 new keys when a copied key is already claimed. Restored tabs can reclaim an
 unclaimed key and their retained history. Tab adoption between windows rebinds
-the key into Firefox session data. Already mixed legacy identities cannot be
-reliably disentangled; the migration does not invent separate histories.
+the key into Firefox session data. History retained in the new database follows
+restored identities; history removed by the storage reset is not reconstructed.
 
 Metadata includes:
 
@@ -46,8 +76,8 @@ Metadata includes:
   a known closed tab is restored. Keep this distinct from first observation when
   assessing whether a currently open tab has enough history.
 * `lastActivatedAt` and `lastActivationSource`: observed foreground activation or
-  focus time, with legacy provenance where imported. Navigation and checkpoint
-  continuation do not manufacture a new activation.
+  focus time. Navigation and checkpoint continuation do not manufacture a new
+  activation.
 * `lastForegroundObservedAt`: foreground observation at recorder startup/recovery
   when the actual activation time is unknown.
 * `lastAccessedAt` and `lastAccessedSource`: Firefox's available selection
@@ -66,8 +96,8 @@ Metadata does not store a second complete copy of every tab's URL/title history.
 
 Completed intervals preserve the existing `tabKey`, `tabIdAtTime`,
 `windowIdAtTime`, `startedAt`, `endedAt`, `durationMs`, `url`, `title`, and
-`endReason`. New intervals also have a unique `sessionId`, `startReason`, and
-`foregroundActivatedAt` (nullable). Migrated intervals may lack those new fields.
+`endReason`, a unique `sessionId`, `startReason`, and `foregroundActivatedAt`
+(nullable). Persisted records also carry a sequence number.
 
 Only the selected tab in the focused window accrues foreground time. Activation,
 focus changes, navigation, discard, closure, and detachment end or start the
@@ -107,7 +137,7 @@ that is still sleeping when a fresh recording history begins.
 `usageCoverage.historyId` distinguishes recording generations, so queued events
 from before Clear usage data cannot repopulate a new history, even if timestamps
 fall in the same millisecond. `recordingStartedAt` marks the initial boundary;
-`legacyHistory` indicates imported data without reliable coverage. A segment has
+`legacyHistory` remains false for fresh histories; no old records are imported. A segment has
 `id`, `startedAt`, `lastCheckpointAt`, `endedAt` (null while open), `startReason`,
 and, once ended, `endReason`. `observationErrors` flags failed tab observations;
 `observationErrorsFrom`/`observationErrorsThrough` bound the affected interval so a
@@ -180,12 +210,15 @@ No detailed activity records are collected while recording is disabled.
 
 ## Verification
 
-Browser-independent tests exercise migration, retention/caps, coverage, duplicate
-sleep episodes, tab metadata, and test-only tab/website/day calculations. Background
+Tests exercise the deliberate old-history reset, small settings/runtime writes,
+indexed history persistence, transaction rollback, large-history behavior,
+retention/caps, coverage, duplicate sleep episodes, tab metadata, and test-only
+tab/website/day calculations. Background
 integration tests drive mocked Firefox event/message/storage APIs for opt-in/out,
 clearing, source attribution, refusals, navigation, focus, tab movement, clean
 suspension, unexpected reload, restart, closure, restoration, and duplication.
 
-A live Firefox smoke test is still needed before publishing. The implementation
-environment blocks local socket creation, so a Marionette session could not be
-started here; mocked integration tests do not replace that check.
+Node tests use an asynchronous IndexedDB contract double; browser tests use native
+IndexedDB. Neither Node timings nor mocked Firefox event tests establish actual
+Firefox UI latency. A live Firefox smoke test is still needed before publishing;
+headless Firefox crashes in the implementation environment before loading tests.

@@ -127,7 +127,7 @@ export function closeTabMetadata(state, tabId, now) {
 }
 
 export function captureRecordingContext(state) {
-  return state ? { enabled: state.settings.usageTrackingEnabled, historyId: state.usageCoverage?.historyId } : null;
+  return state && !state.historyLoading ? { enabled: state.settings.usageTrackingEnabled, historyId: state.usageCoverage?.historyId } : null;
 }
 
 export function acceptsRecordingEvent(state, context, now) {

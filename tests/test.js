@@ -1,3 +1,5 @@
+import { registerPopupTests } from "./popup.test.js";
+import { registerHistoryTests } from "./history.test.js";
 import { registerClientTests } from "./memory-saver-client.test.js";
 import { registerExternalProtectionTests } from "./external-protection.test.js";
 import { registerRecorderTests } from "./recorder.test.js";
@@ -332,7 +334,7 @@ test("background module loads against the Firefox API contract", async () => {
   const alarms = [];
   globalThis.browser = {
     storage: {
-      local: { async get() { return {}; }, async set() {} },
+      local: { async get() { return {}; }, async set() {}, async remove() {} },
       session: { async get() { return {}; }, async set() {}, async remove() {} },
     },
     alarms: { async clear() {}, create(name, options) { alarms.push({ name, ...options }); }, onAlarm: event },
@@ -421,6 +423,8 @@ test("background module loads against the Firefox API contract", async () => {
 registerRecorderTests(test, equal);
 registerExternalProtectionTests(test, equal);
 registerClientTests(test, equal);
+registerHistoryTests(test, equal);
+registerPopupTests(test, equal);
 
 const results = document.querySelector("#results");
 let failures = 0;
