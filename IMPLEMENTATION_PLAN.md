@@ -67,7 +67,7 @@ otherwise ineligible tab.
 | Tests | Browser-native test harness | Runs the same ES modules in Firefox with small API mocks. |
 | Browser API | Native `browser.*` API | Firefox supports promises natively; no polyfill is needed. |
 | Scheduling | `browser.alarms` | Timers remain reliable when the background page is unloaded. |
-| Persistence | `browser.storage.local` | Suitable for settings and small tab-record maps. |
+| Persistence | Small `browser.storage.local` entries plus IndexedDB | Settings/runtime stay independent of individually stored history records. |
 | Usage tracking | Foreground activation intervals | Tab and window events provide useful durations without reading page content. |
 | Memory figure | Future work; absent from `0.1.0` | Calibration is too much work for the MVP and exact bytes are unavailable. |
 
@@ -313,8 +313,9 @@ derived from timestamps using a single captured
 
 ### Privacy and retention
 
-Usage tracking is opt-in and disabled by default. Its data remains in
-`browser.storage.local`; it is never transmitted. The default retention after
+Usage tracking is opt-in and disabled by default. Detailed records stay in local
+IndexedDB; settings and operational state use separate small
+`browser.storage.local` entries. Data is never transmitted. The default retention after
 opt-in is 14 days, configurable from 1 to 365 days. Settings provide a one-click
 "Clear usage data" action. Disabling tracking closes the current session and
 deletes all usage history. The privacy notice must explain that URLs, titles,
@@ -571,9 +572,9 @@ functions will not import browser globals directly.
 | Alarm and tab events race. | Scan lock, post-discard confirmation, idempotent record updates, and reconciliation. |
 | Stored tab IDs become stale after restart. | Treat live `tabs.query()` results as source of truth on every startup. |
 | Usage time is mistaken for attention. | Label it foreground active-tab time and document idle-time limitations. |
-| Usage history becomes sensitive or unbounded. | Opt-in local-only storage, 7-day default, 30-day cap, pruning, and one-click deletion. |
+| Usage history becomes sensitive or unbounded. | Opt-in local-only indexed storage, 14-day default, 365-day maximum, independent record caps, pruning, and one-click deletion. |
 | Shutdown inflates an open session. | Periodic checkpoints and conservative startup recovery at the last checkpoint. |
-| Large tab sessions make the popup slow. | Compute state in the background, render incrementally if needed, and cap expensive DOM work. |
+| Large histories make the UI slow. | Never serialize history with settings; render popup controls independently and fetch indexed activity summaries afterward. |
 | Special Firefox pages reject API operations. | Exclude non-web schemes and handle every discard call independently. |
 
 ## 18. Recommended implementation order

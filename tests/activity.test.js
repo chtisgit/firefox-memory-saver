@@ -2,26 +2,12 @@ import {
   canContinueRecording, closeTabMetadata, endCoverage, markTabLoaded,
   MAX_CONTINUITY_MS, MAX_DISCARD_EVENTS, MAX_USAGE_SESSIONS, observeTab, recordDiscard, startCoverage,
 } from "../src/core/activity.js";
-import { DEFAULT_SETTINGS, emptyState, normalizeState } from "../src/core/settings.js";
+import { DEFAULT_SETTINGS, emptyState } from "../src/core/settings.js";
 import { checkpointUsage, clearUsage, endLiveRecord, recoverInterruptedUsage, usageSummaryForTab } from "../src/core/usage.js";
 
 export function registerActivityTests(test, equal) {
   const makeState = () => ({ ...emptyState(), settings: { ...DEFAULT_SETTINGS, usageTrackingEnabled: true } });
   const tab = (id, overrides = {}) => ({ id, windowId: 1, discarded: false, url: "https://a.example/page", title: "A", lastAccessed: 100, ...overrides });
-
-  test("activity migration preserves settings and sessions without inventing sleeps or coverage", () => {
-    const session = { tabKey: "old", startedAt: 100, endedAt: 200, durationMs: 100 };
-    const state = normalizeState({ schemaVersion: 1, settings: { usageTrackingEnabled: true, usageHistoryDays: 30 }, usageSessions: [session] });
-    equal(state.schemaVersion, 2);
-    equal(state.settings.usageHistoryDays, 30);
-    equal(state.usageSessions, [session]);
-    equal(state.usageDiscardEvents, []);
-    equal(state.usageCoverage.legacyHistory, true);
-    equal(state.usageCoverage.recordingStartedAt, null);
-    equal(state.usageCoverage.segments, []);
-    equal(normalizeState(state).usageCoverage.legacyHistory, true);
-    equal(normalizeState({ schemaVersion: 1 }).usageCoverage.legacyHistory, false);
-  });
 
   test("sleep episodes are deduplicated independently of discard popup records", () => {
     const state = makeState();

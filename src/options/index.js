@@ -1,4 +1,4 @@
-import { DEFAULT_SETTINGS, normalizeDomain } from "../core/settings.js";
+import { DEFAULT_SETTINGS, loadSettings, normalizeDomain } from "../core/settings.js";
 
 const form = document.querySelector("#settings-form");
 const fields = {
@@ -83,4 +83,4 @@ document.querySelector("#clear-usage").addEventListener("click", async () => {
   } catch (error) { showStatus(error.message, true); }
 });
 
-request({ type: "GET_SETTINGS" }).then(populate).catch((error) => showStatus(error.message, true));
+loadSettings().then(populate).catch((error) => showStatus(error.message, true));

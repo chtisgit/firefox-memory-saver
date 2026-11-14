@@ -1,4 +1,5 @@
-import { calculateScanInterval, loadState, normalizeSettings, saveState } from "../core/settings.js";
+import { HistoryStore } from "../core/history-store.js";
+import { calculateScanInterval, loadSettings, loadState, normalizeSettings, saveState } from "../core/settings.js";
 import { acceptsRecordingEvent, activityId, canContinueRecording, captureRecordingContext, endCoverage, noteObservationError, startCoverage } from "../core/activity.js";
 import { hostnameMatches, protectedHostname, protectionReasons, selectEligibleByWindow } from "../core/eligibility.js";
 import {
@@ -16,7 +17,6 @@ import {
   releaseTabKey,
   recoverInterruptedUsage,
   startUsageSession,
-  usageSummaryForTab,
 } from "../core/usage.js";
 
 const SCAN_ALARM = "memory-saver-scan";
@@ -27,6 +27,15 @@ const LAST_SLEEP_KEY = "memorySaverLastSleep";
 const MENU_ROOT = "memory-saver-menu";
 const MENU_TAB_PROTECTION = "memory-saver-toggle-tab-protection";
 const MENU_DOMAIN_PROTECTION = "memory-saver-toggle-domain-protection";
+const history = new HistoryStore();
+let resolvePopupReady;
+let rejectPopupReady;
+const popupReady = new Promise((resolve, reject) => { resolvePopupReady = resolve; rejectPopupReady = reject; });
+popupReady.catch(() => {});
+let resolveRecorderReady;
+let rejectRecorderReady;
+const recorderReady = new Promise((resolve, reject) => { resolveRecorderReady = resolve; rejectRecorderReady = reject; });
+recorderReady.catch(() => {});
 let state;
 let queue = Promise.resolve();
 let scanRunning = false;
@@ -57,7 +66,8 @@ async function persist() {
     await startFocusedTab(Date.now(), "recorder-resumed");
   }
   state.usageRecorder.revision += 1;
-  state = await saveState(state);
+  await saveState(state);
+  await history.save(state);
   lastPersistedRevision = state.usageRecorder.revision;
   recorderHealthy = true;
 }
@@ -346,28 +356,26 @@ async function runScan({ ignoreInactivity = false, windowId, reason = "automatic
 }
 
 async function popupState(targetTabId) {
-  const tabs = await tabsWithProtection(await reconcileRecords());
-  await persist();
+  await popupReady;
+  const tabs = await tabsWithProtection(await browser.tabs.query({}));
   const [activeTab] = targetTabId === undefined ? await browser.tabs.query({ active: true, currentWindow: true }) : [];
   const currentTab = tabs.find((tab) => tab.id === (targetTabId === undefined ? activeTab?.id : targetTabId));
   const now = Date.now();
   let currentTabDetails = null;
   if (currentTab) {
     let lastSleep = null;
-    let usage = null;
+    const usage = null;
     try {
       lastSleep = await browser.sessions.getTabValue(currentTab.id, LAST_SLEEP_KEY);
-      if (state.settings.usageTrackingEnabled) {
-        usage = usageSummaryForTab(state, await getTabKey(currentTab.id), now);
-      }
     } catch (error) {
       console.warn(`Could not read tab details for ${currentTab.id}`, error);
     }
     currentTabDetails = { ...currentTab, protectionReasons: protectionReasons(currentTab, state.settings), lastSleep, usage };
   }
-  const discardedTabs = Object.values(state.discardRecords)
-    .map((record) => ({ ...record, usage: usageSummaryForTab(state, record.tabKey, now) }))
-    .sort((a, b) => b.discardedAt - a.discardedAt);
+  const discardedTabs = tabs.filter(tab => tab.discarded).map(tab => ({
+    ...(state.discardRecords[String(tab.id)] ?? { discardedAt: null, reason: "external" }),
+    tabId: tab.id, windowId: tab.windowId, title: tab.title ?? "", url: tab.url ?? "", favIconUrl: tab.favIconUrl,
+  })).sort((a, b) => b.discardedAt - a.discardedAt);
   const protectedTabs = tabs
     .map((tab) => ({ ...tab, protectionReasons: protectionReasons(tab, state.settings) }))
     .filter((tab) => tab.protectionReasons.length)
@@ -380,6 +388,19 @@ async function popupState(targetTabId) {
     currentTab: currentTabDetails,
     lifetimeDiscardCount: state.lifetimeDiscardCount,
   };
+}
+
+async function tabUsages(tabIds) {
+  await recorderReady;
+  if (!state.settings.usageTrackingEnabled || !state.usageCoverage.historyId || !Array.isArray(tabIds)) return {};
+  const generation = state.usageCoverage.historyId;
+  const settings = { ...state.settings };
+  const liveIds = new Set((await browser.tabs.query({})).map(tab => tab.id));
+  const entries = await Promise.all([...new Set(tabIds)].filter(id => liveIds.has(id))
+    .map(async id => [id, await getTabKey(id, false)]));
+  const summaries = await history.summaries(settings, entries.map(([, key]) => key), generation);
+  if (state.usageCoverage.historyId !== generation || !state.settings.usageTrackingEnabled) return {};
+  return Object.fromEntries(entries.filter(([, key]) => summaries[key]).map(([id, key]) => [id, summaries[key]]));
 }
 
 async function handleMessage(message) {
@@ -426,7 +447,17 @@ async function handleMessage(message) {
   }
 }
 
-browser.runtime.onMessage.addListener((message) => serialized(() => handleMessage(message)).catch((error) => ({ ok: false, error: error.message })));
+browser.runtime.onMessage.addListener((message) => {
+  // UI reads must not wait behind recorder writes, cleanup, or history startup.
+  const result = message?.type === "GET_SETTINGS"
+    ? loadSettings().then(data => ({ ok: true, data }))
+    : message?.type === "GET_POPUP_STATE"
+      ? popupState(message.targetTabId).then(data => ({ ok: true, data }))
+      : message?.type === "GET_TAB_USAGE"
+        ? tabUsages(message.tabIds).then(data => ({ ok: true, data }))
+        : serialized(() => handleMessage(message));
+  return result.catch(error => ({ ok: false, error: error.message }));
+});
 
 browser.runtime.onInstalled.addListener(() => {
   createContextMenus().catch((error) => console.error("Could not create Memory Saver menus", error));
@@ -647,10 +678,12 @@ async function reconcileRecorderForeground(checkpoints = new Map()) {
 
 async function initialize() {
   state = await loadState();
+  state.historyStore = history;
+  state.historyLoading = true;
   const runtime = await recorderRuntime();
   browserSessionId = runtime.sessionId;
-  const now = Date.now();
-  const tabs = await browser.tabs.query({});
+  let now = Date.now();
+  let tabs = await browser.tabs.query({});
   for (const tab of tabs.filter((item) => Number.isInteger(item.id)).sort((a, b) => a.id - b.id)) {
     try {
       await getTabKey(tab.id, false);
@@ -658,6 +691,15 @@ async function initialize() {
       console.warn(`Could not check tab identity for ${tab.id}`, error);
     }
   }
+  await reconcileRecords();
+  await reconcileAllTabDiscardability();
+  await configureAlarms();
+  resolvePopupReady();
+  // No completed history is loaded here: only recorder checkpoint/open-tab rows.
+  await history.load(state);
+  state.historyLoading = false;
+  now = Date.now();
+  tabs = await browser.tabs.query({});
   const continuation = state.settings.usageTrackingEnabled
     && canContinueRecording(state, browserSessionId, runtime.suspended, now);
   const checkpoints = new Map(Object.entries(state.liveUsageRecords).map(([key, record]) => [key, {
@@ -679,16 +721,18 @@ async function initialize() {
   }
   pruneUsage(state, now);
   await reconcileRecords();
-  await reconcileAllTabDiscardability();
-  await configureAlarms();
   if (continuation) {
     // Wake-triggering activation/focus/navigation events are already queued. Let
     // them close the old interval at their captured event time before reconciling.
     // Do not checkpoint the old foreground state until those events run.
-    serialized(() => reconcileRecorderForeground(checkpoints));
+    serialized(async () => {
+      await reconcileRecorderForeground(checkpoints);
+      resolveRecorderReady();
+    }).catch(rejectRecorderReady);
   } else {
     await persist();
+    resolveRecorderReady();
   }
 }
 
-serialized(initialize);
+serialized(initialize).catch(error => { rejectPopupReady(error); rejectRecorderReady(error); });

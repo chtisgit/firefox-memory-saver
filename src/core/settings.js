@@ -1,4 +1,4 @@
-import { ACTIVITY_SCHEMA_VERSION, emptyActivityState, normalizeActivityState } from "./activity.js";
+import { ACTIVITY_SCHEMA_VERSION, emptyActivityState } from "./activity.js";
 
 export const STORAGE_KEY = "memorySaverState";
 
@@ -79,28 +79,51 @@ export function emptyState() {
   };
 }
 
-export function normalizeState(value = {}) {
-  const initial = emptyState();
+export const SETTINGS_KEY = "memorySaverSettings";
+export const RUNTIME_KEY = "memorySaverRuntime";
+const saved = new WeakMap();
+
+function operationalState(value = {}) {
   return {
-    ...initial,
-    ...value,
-    ...normalizeActivityState(value),
-    schemaVersion: ACTIVITY_SCHEMA_VERSION,
-    settings: normalizeSettings(value.settings),
     discardRecords: value.discardRecords && typeof value.discardRecords === "object" ? value.discardRecords : {},
-    liveUsageRecords: value.liveUsageRecords && typeof value.liveUsageRecords === "object" ? value.liveUsageRecords : {},
-    usageSessions: Array.isArray(value.usageSessions) ? value.usageSessions : [],
     lifetimeDiscardCount: Number.isInteger(value.lifetimeDiscardCount) && value.lifetimeDiscardCount >= 0 ? value.lifetimeDiscardCount : 0,
   };
 }
 
 export async function loadState() {
-  const stored = await browser.storage.local.get(STORAGE_KEY);
-  return normalizeState(stored[STORAGE_KEY]);
+  const stored = await browser.storage.local.get([SETTINGS_KEY, RUNTIME_KEY]);
+  let settings = stored[SETTINGS_KEY];
+  let runtime = stored[RUNTIME_KEY];
+  if (!settings || !runtime) {
+    // Keep preferences and ordinary operational data ONLY. Legacy history is
+    // deliberately discarded, never imported into the new history database.
+    const legacy = (await browser.storage.local.get(STORAGE_KEY))[STORAGE_KEY] ?? {};
+    settings = normalizeSettings(settings ?? legacy.settings);
+    runtime = operationalState(runtime ?? legacy);
+    await browser.storage.local.set({ [SETTINGS_KEY]: settings, [RUNTIME_KEY]: runtime });
+  }
+  // Idempotent cleanup also handles interruption after writing the small keys.
+  await browser.storage.local.remove(STORAGE_KEY);
+  const state = { ...emptyState(), settings: normalizeSettings(settings), ...operationalState(runtime), historyBuffered: true };
+  saved.set(state, { settings: JSON.stringify(state.settings), runtime: JSON.stringify(operationalState(state)) });
+  return state;
+}
+
+export async function loadSettings() {
+  const settings = (await browser.storage.local.get(SETTINGS_KEY))[SETTINGS_KEY];
+  return settings ? normalizeSettings(settings) : (await loadState()).settings;
 }
 
 export async function saveState(state) {
-  const normalized = normalizeState(state);
-  await browser.storage.local.set({ [STORAGE_KEY]: normalized });
-  return normalized;
+  const settings = normalizeSettings(state.settings);
+  const runtime = operationalState(state);
+  const next = { settings: JSON.stringify(settings), runtime: JSON.stringify(runtime) };
+  const previous = saved.get(state) ?? {};
+  const updates = {};
+  if (next.settings !== previous.settings) updates[SETTINGS_KEY] = settings;
+  if (next.runtime !== previous.runtime) updates[RUNTIME_KEY] = runtime;
+  if (Object.keys(updates).length) await browser.storage.local.set(updates);
+  state.settings = settings;
+  saved.set(state, next);
+  return state;
 }

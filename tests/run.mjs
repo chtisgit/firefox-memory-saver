@@ -1,3 +1,8 @@
+if (!globalThis.indexedDB) {
+  const { TestIDBFactory, TestKeyRange } = await import("./indexeddb-mock.js");
+  globalThis.indexedDB = new TestIDBFactory();
+  globalThis.IDBKeyRange = TestKeyRange;
+}
 // Optional Node runner for the same suite used by tests/index.html.
 const results = [];
 const summary = {};

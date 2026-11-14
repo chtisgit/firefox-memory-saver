@@ -38,6 +38,10 @@ export function releaseTabKey(tabId) {
 export async function observeUsageTab(state, tab, now = Date.now(), options = {}) {
   if (!state.settings.usageTrackingEnabled || !Number.isInteger(tab?.id)) return null;
   const key = await getTabKey(tab.id);
+  if (!state.usageTabMetadata[key] && state.historyStore) {
+    const saved = await state.historyStore.tabMetadata(key);
+    if (saved) state.usageTabMetadata[key] = saved;
+  }
   return observeTab(state, key, tab, now, options);
 }
 
@@ -55,7 +59,7 @@ export async function markUsageTabLoaded(state, tab, now = Date.now()) {
 }
 
 export function pruneUsage(state, now = Date.now()) {
-  pruneActivity(state, now);
+  if (!state.historyBuffered) pruneActivity(state, now);
 }
 
 export function endLiveRecord(state, record, endedAt, endReason) {
