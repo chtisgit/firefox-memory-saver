@@ -194,6 +194,10 @@ your extension can separately use:
 await browser.tabs.update(targetTabId, { autoDiscardable: false });
 ```
 
+Memory Saver also honors this flag if the user enables **Never discard tabs that are not 'autoDiscardable'** in Protected tabs settings. That option is
+disabled by default; use this API for explicit, expiring protection regardless
+of that preference.
+
 Other extensions' explicit `tabs.discard()` calls can still discard that tab.
 The flag has no per-extension ownership; coordinate cleanup carefully. See
 [Firefox's discard documentation](https://developer.mozilla.org/en-US/docs/Mozilla/Add-ons/WebExtensions/API/tabs/discard).

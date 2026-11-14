@@ -9,6 +9,7 @@ const fields = {
   protectPinned: document.querySelector("#protect-pinned"),
   protectAudible: document.querySelector("#protect-audible"),
   allowExternalProtection: document.querySelector("#allow-external-protection"),
+  respectAutoDiscardable: document.querySelector("#respect-auto-discardable"),
   protectedDomains: document.querySelector("#domains"),
   usageTrackingEnabled: document.querySelector("#usage-enabled"),
   usageHistoryDays: document.querySelector("#usage-days"),
@@ -34,6 +35,7 @@ function populate(settings) {
   fields.protectPinned.checked = settings.protectPinned;
   fields.protectAudible.checked = settings.protectAudible;
   fields.allowExternalProtection.checked = settings.allowExternalProtection;
+  fields.respectAutoDiscardable.checked = settings.respectAutoDiscardable;
   fields.protectedDomains.value = settings.protectedDomains.join("\n");
   fields.usageTrackingEnabled.checked = settings.usageTrackingEnabled;
   fields.usageHistoryDays.value = settings.usageHistoryDays;
@@ -53,6 +55,7 @@ function readSettings() {
     protectPinned: fields.protectPinned.checked,
     protectAudible: fields.protectAudible.checked,
     allowExternalProtection: fields.allowExternalProtection.checked,
+    respectAutoDiscardable: fields.respectAutoDiscardable.checked,
     protectedDomains: rawDomains,
     usageTrackingEnabled: fields.usageTrackingEnabled.checked,
     usageHistoryDays: Number(fields.usageHistoryDays.value),

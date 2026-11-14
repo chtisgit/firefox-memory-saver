@@ -134,6 +134,33 @@ export async function recorderHarness({ enabled = true, tabs = [makeTab(2001, { 
 }
 
 export function registerRecorderTests(test, equal) {
+  test("autoDiscardable preference persists, protects both discard paths, and preserves manual toggling", async () => {
+    const h = await recorderHarness({ enabled: false, tabs: [makeTab(2001, { active: true }),
+      makeTab(2002, { autoDiscardable: false }), makeTab(2003)] });
+    try {
+      equal(h.state().settings.respectAutoDiscardable, false);
+      equal((await h.request({ type: 'GET_POPUP_STATE' })).eligibleDiscardCount, 2);
+      await h.request({ type: 'SAVE_SETTINGS', settings: { ...h.state().settings, respectAutoDiscardable: true } });
+      await h.load();
+      equal(h.state().settings.respectAutoDiscardable, true);
+      let view = await h.request({ type: 'GET_POPUP_STATE', targetTabId: 2002 });
+      equal(view.eligibleDiscardCount, 1);
+      equal(view.currentTab.protectionReasons, [{ type: 'auto-discardable' }]);
+      equal(view.protectedTabs.map(t => t.id), [2002]);
+      await h.request({ type: 'TOGGLE_TAB_PROTECTION', tabId: 2003 });
+      view = await h.request({ type: 'GET_POPUP_STATE', targetTabId: 2003 });
+      equal(view.currentTab.protectionReasons, [{ type: 'tab' }]);
+      await h.request({ type: 'TOGGLE_TAB_PROTECTION', tabId: 2003 });
+      equal(h.tabs.find(t => t.id === 2003).autoDiscardable, true);
+      h.emit('alarm', { name: 'memory-saver-scan' }); await h.flush();
+      equal(h.tabs.find(t => t.id === 2002).discarded, false);
+      equal(h.tabs.find(t => t.id === 2003).discarded, true);
+      equal((await h.request({ type: 'DISCARD_ELIGIBLE_NOW' })).discardedTabIds, []);
+      await h.request({ type: 'SAVE_SETTINGS', settings: { ...h.state().settings, respectAutoDiscardable: false } });
+      equal((await h.request({ type: 'DISCARD_ELIGIBLE_NOW' })).discardedTabIds, [2002]);
+    } finally { await h.dispose(); }
+  });
+
   test("recording is opt-in, registers sleeping/protected tabs, and clears every detailed collection", async () => {
     const h = await recorderHarness({ enabled: false, tabs: [makeTab(2001, { active: true }), makeTab(2002, { discarded: true }), makeTab(2003, { pinned: true })] });
     try {

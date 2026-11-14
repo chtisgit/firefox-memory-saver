@@ -14,6 +14,7 @@ ordinary text Git objects.
 
 - Configurable automatic discarding based on Firefox's `lastAccessed` timestamp.
 - Protection for active, pinned, audible, internal, and allowlisted-domain tabs.
+- Optional protection for tabs with `autoDiscardable: false`, disabled by default.
 - A tab context-menu submenu for protecting one tab or its entire domain.
 - Minimum numbers of loaded tabs retained in each window and across all windows.
 - Popup views listing sleeping and protected tabs, with live counts for both.

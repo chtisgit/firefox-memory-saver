@@ -10,6 +10,9 @@ p { margin: 4px 0; color: color-mix(in srgb, CanvasText 68%, transparent); }
 section { margin: 16px 0; padding: 24px; border: 1px solid color-mix(in srgb, CanvasText 15%, transparent); border-radius: 12px; }
 label { display: block; margin: 12px 0; font-weight: 600; }
 .check { display: flex; gap: 9px; align-items: center; }
+.check-with-hint { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 2px 9px; align-items: center; margin: 12px 0; }
+.check-with-hint > input { grid-column: 1; grid-row: 1; }
+.check-with-hint > label, .check-with-hint > .hint { grid-column: 2; margin: 0; }
 input[type="checkbox"] { width: 17px; height: 17px; }
 input[type="number"], textarea { margin-top: 6px; border: 1px solid color-mix(in srgb, CanvasText 25%, transparent); border-radius: 6px; background: Field; color: FieldText; font: inherit; }
 input[type="number"] { width: 88px; padding: 7px; }

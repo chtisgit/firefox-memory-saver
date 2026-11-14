@@ -35,6 +35,42 @@ test("external protection defaults on for new and older settings, while preservi
   equal(normalizeSettings({ allowExternalProtection: "false" }).allowExternalProtection, true);
 });
 
+test("respecting autoDiscardable defaults off for new and older settings", () => {
+  equal(DEFAULT_SETTINGS.respectAutoDiscardable, false);
+  equal(normalizeSettings({}).respectAutoDiscardable, false);
+  equal(normalizeSettings({ inactivityMinutes: 45 }).respectAutoDiscardable, false);
+  equal(normalizeSettings({ respectAutoDiscardable: true }).respectAutoDiscardable, true);
+  equal(normalizeSettings({ respectAutoDiscardable: "true" }).respectAutoDiscardable, false);
+});
+
+test("autoDiscardable protection is opt-in and applies only to a literal false flag", () => {
+  const candidate = tab({ autoDiscardable: false });
+  const settings = { ...DEFAULT_SETTINGS, respectAutoDiscardable: true };
+  equal(inspectEligibility(candidate, DEFAULT_SETTINGS, 10000000).eligible, true);
+  equal(protectionReasons(candidate, DEFAULT_SETTINGS), []);
+  equal(inspectEligibility(candidate, settings, 10000000).reason, "auto-discardable");
+  equal(inspectEligibility(candidate, settings, 10000000, { ignoreInactivity: true }).reason, "auto-discardable");
+  equal(protectionReasons(candidate, settings), [{ type: "auto-discardable" }]);
+  for (const value of [undefined, null, true, 0]) {
+    equal(inspectEligibility(tab({ autoDiscardable: value }), settings, 10000000).eligible, true);
+  }
+  // Memory Saver's own manual protection sets the flag. Avoid hiding its
+  // unprotect button behind a second protection reason caused by that flag.
+  equal(protectionReasons(tab({ autoDiscardable: false, memorySaverProtected: true }), settings), [{ type: "tab" }]);
+});
+
+test("autoDiscardable-protected tabs stay loaded in addition to both minimums", () => {
+  const settings = { ...DEFAULT_SETTINGS, respectAutoDiscardable: true,
+    minimumLoadedTabsPerWindow: 1, minimumLoadedTabsTotal: 1 };
+  const selected = selectEligibleByWindow([
+    tab({ id: 1, active: true }),
+    tab({ id: 2, autoDiscardable: false }),
+    tab({ id: 3, lastAccessed: 100 }),
+    tab({ id: 4, lastAccessed: 200 }),
+  ], settings, 10000000);
+  equal(selected.map(t => t.id), [3]);
+});
+
 test("normalizes domains and subdomain input", () => {
   equal(normalizeDomain(" HTTPS://Mail.Example.com/path "), "mail.example.com");
   equal(normalizeDomain("not a domain"), null);

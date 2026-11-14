@@ -25,6 +25,11 @@ export function protectionReasons(tab, settings, now = Date.now()) {
   }
   if (settings.protectPinned && tab.pinned) reasons.push({ type: "pinned" });
   if (settings.protectAudible && tab.audible) reasons.push({ type: "audible" });
+  // Manual protection sets this flag itself. Keep its unprotect action available
+  // rather than presenting our own flag as an independent protection rule.
+  if (settings.respectAutoDiscardable && tab.autoDiscardable === false && !tab.memorySaverProtected) {
+    reasons.push({ type: "auto-discardable" });
+  }
 
   try {
     const url = new URL(tab.url);
@@ -53,6 +58,9 @@ export function inspectEligibility(tab, settings, now = Date.now(), options = {}
   }
   if (settings.protectPinned && tab.pinned) return { eligible: false, reason: "pinned" };
   if (settings.protectAudible && tab.audible) return { eligible: false, reason: "audible" };
+  if (settings.respectAutoDiscardable && tab.autoDiscardable === false) {
+    return { eligible: false, reason: "auto-discardable" };
+  }
 
   let url;
   try {

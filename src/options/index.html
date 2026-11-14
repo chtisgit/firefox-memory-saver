@@ -39,6 +39,11 @@
           <label class="check"><input id="protect-pinned" type="checkbox"> Never discard pinned tabs</label>
           <label class="check"><input id="protect-audible" type="checkbox"> Never discard tabs playing audio</label>
           <label class="check"><input id="allow-external-protection" type="checkbox"> Allow other extensions to protect tabs</label>
+          <div class="check-with-hint">
+            <input id="respect-auto-discardable" type="checkbox" aria-describedby="respect-auto-discardable-hint">
+            <label for="respect-auto-discardable">Never discard tabs that are not 'autoDiscardable'</label>
+            <p id="respect-auto-discardable-hint" class="hint">leave this disabled unless you have a specific reason not to</p>
+          </div>
           <label for="domains">Protected domains</label>
           <textarea id="domains" rows="6" placeholder="mail.example.com&#10;music.example.org"></textarea>
           <p class="hint">One hostname per line. Protecting example.com also protects its subdomains.</p>

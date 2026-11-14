@@ -180,6 +180,7 @@ function protectionLabel(reason) {
     pinned: "Pinned tab",
     audible: "Playing audio",
     "special-page": "Special page",
+    "auto-discardable": "autoDiscardable is false",
   }[reason.type] ?? (reason.type === "domain" ? `Protected domain: ${reason.domain}` : "Protected");
 }
 
