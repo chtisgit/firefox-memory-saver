@@ -1,3 +1,9 @@
+v0.3.1:
+* Fix slow popup and settings loading when recorded activity history grows.
+* Previously recorded activity history is cleared by this update. Settings,
+  protected tabs, recent sleep information, and lifetime discard totals are
+  preserved. Recording starts fresh if enabled.
+
 v0.3.0:
 * Automatic discarding now keeps more tabs loaded for the same "Keep at least"
   setting: active and protected tabs no longer count toward either minimum.
